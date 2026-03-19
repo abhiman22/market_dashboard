@@ -1,0 +1,12 @@
+# Compiled class files
+*.class
+
+# Log files
+*.log
+
+# OS generated files
+.DS_Store
+
+# IDE Specific
+.vscode/
+.idea/
