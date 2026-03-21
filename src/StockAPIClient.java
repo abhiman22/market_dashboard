@@ -13,6 +13,7 @@ public class StockAPIClient {
 
     public StockAPIClient() {
         this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
     }
@@ -61,5 +62,24 @@ public class StockAPIClient {
         }
         
         throw new IOException("Failed to get quote for " + symbol + ". Status code: " + response.statusCode());
+    }
+
+    public String getHistoricalData(String symbol, String range) throws IOException, InterruptedException {
+        String encodedSymbol = java.net.URLEncoder.encode(symbol, java.nio.charset.StandardCharsets.UTF_8);
+        String url = API_URL + encodedSymbol + "?range=" + range + "&interval=1d";
+        
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", "Mozilla/5.0")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() == 200) {
+            return response.body();
+        }
+        
+        throw new IOException("Failed to get historical data for " + symbol + ". Status code: " + response.statusCode());
     }
 }

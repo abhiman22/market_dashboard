@@ -23,20 +23,24 @@ public class StockDashboardUI extends JFrame {
         this.apiClient = new StockAPIClient();
         this.sectorSymbols = new LinkedHashMap<>();
         this.sectorModels = new LinkedHashMap<>();
-        
+
         setupData();
         initUI();
         refreshData();
     }
 
     private void setupData() {
-        sectorSymbols.put("Indices", new ArrayList<>(List.of("^BSESN", "^NSEI", "BSE-SMLCAP.BO", "^NSEMDCP50")));
-        sectorSymbols.put("Financials", new ArrayList<>(List.of("HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS", "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS")));
+        sectorSymbols.put("Indices", new ArrayList<>(List.of("LRGCAP.BO", "^NSEI", "BSE-MIDCAP.BO", "BSE-SMLCAP.BO")));
+        sectorSymbols.put("Financials", new ArrayList<>(List.of("HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS",
+                "KOTAKBANK.NS", "AXISBANK.NS", "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS")));
         sectorSymbols.put("IT", new ArrayList<>(List.of("TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS")));
         sectorSymbols.put("Energy & Utilities", new ArrayList<>(List.of("RELIANCE.NS", "NTPC.NS", "POWERGRID.NS")));
-        sectorSymbols.put("FMCG & Consumer", new ArrayList<>(List.of("ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "ASIANPAINT.NS", "TITAN.NS")));
-        sectorSymbols.put("Automobile", new ArrayList<>(List.of("MARUTI.NS", "M&M.NS", "TATAMOTORS.NS", "BAJAJAUTO.NS")));
-        sectorSymbols.put("Industrial, Pharma & Metals", new ArrayList<>(List.of("LT.NS", "BHARTIARTL.NS", "SUNPHARMA.NS", "TATASTEEL.NS", "ULTRACEMCO.NS", "JSWSTEEL.NS", "ADANIPORTS.NS")));
+        sectorSymbols.put("FMCG & Consumer",
+                new ArrayList<>(List.of("ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "ASIANPAINT.NS", "TITAN.NS")));
+        sectorSymbols.put("Automobile",
+                new ArrayList<>(List.of("MARUTI.NS", "M&M.NS", "TATAMOTORS.NS", "BAJAJAUTO.NS")));
+        sectorSymbols.put("Industrial, Pharma & Metals", new ArrayList<>(List.of("LT.NS", "BHARTIARTL.NS",
+                "SUNPHARMA.NS", "TATASTEEL.NS", "ULTRACEMCO.NS", "JSWSTEEL.NS", "ADANIPORTS.NS")));
     }
 
     private void initUI() {
@@ -55,12 +59,12 @@ public class StockDashboardUI extends JFrame {
         JLabel addLabel = new JLabel("Add Symbol to current tab (.NS for NSE, .BO for BSE): ");
         addLabel.setFont(boldFont);
         topPanel.add(addLabel);
-        
+
         symbolInput = new JTextField(12);
         symbolInput.setFont(mainFont);
         symbolInput.addActionListener(e -> addSymbol());
         topPanel.add(symbolInput);
-        
+
         addSymbolBtn = new JButton("Add");
         addSymbolBtn.setFont(mainFont);
         addSymbolBtn.setBackground(new Color(41, 128, 185));
@@ -75,7 +79,7 @@ public class StockDashboardUI extends JFrame {
         refreshBtn.setForeground(Color.WHITE);
         refreshBtn.setFocusPainted(false);
         refreshBtn.addActionListener(e -> refreshData());
-        
+
         topPanel.add(Box.createHorizontalStrut(20));
         topPanel.add(refreshBtn);
 
@@ -87,7 +91,8 @@ public class StockDashboardUI extends JFrame {
         // Custom Cell Renderer for colors
         DefaultTableCellRenderer colorRenderer = new DefaultTableCellRenderer() {
             @Override
-            public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+                    boolean hasFocus, int row, int column) {
                 Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
                 if (value != null) {
                     String strValue = value.toString();
@@ -101,12 +106,14 @@ public class StockDashboardUI extends JFrame {
                         c.setForeground(Color.BLACK);
                     }
                 }
-                if (isSelected) c.setForeground(Color.BLACK);
+                if (isSelected)
+                    c.setForeground(Color.BLACK);
                 return c;
             }
         };
 
-        String[] columns = {"Symbol", "Company Name", "Current Price (₹)", "Change", "% Change", "52W High", "52W Low", "Δ 52W High"};
+        String[] columns = { "Symbol", "Company Name", "Current Price (₹)", "Change", "% Change", "52W High", "52W Low",
+                "Δ 52W High" };
 
         for (String sector : sectorSymbols.keySet()) {
             DefaultTableModel model = new DefaultTableModel(columns, 0) {
@@ -124,7 +131,7 @@ public class StockDashboardUI extends JFrame {
             table.getTableHeader().setFont(boldFont);
             table.getTableHeader().setBackground(new Color(236, 240, 241));
             table.setSelectionBackground(new Color(189, 195, 199));
-            
+
             table.getColumnModel().getColumn(3).setCellRenderer(colorRenderer);
             table.getColumnModel().getColumn(4).setCellRenderer(colorRenderer);
             table.getColumnModel().getColumn(7).setCellRenderer(colorRenderer);
@@ -139,7 +146,8 @@ public class StockDashboardUI extends JFrame {
 
     private void addSymbol() {
         String sym = symbolInput.getText().trim().toUpperCase();
-        if (sym.isEmpty()) return;
+        if (sym.isEmpty())
+            return;
 
         int selectedIndex = tabbedPane.getSelectedIndex();
         if (selectedIndex >= 0) {
@@ -157,7 +165,7 @@ public class StockDashboardUI extends JFrame {
         refreshBtn.setEnabled(false);
         addSymbolBtn.setEnabled(false);
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-        
+
         for (DefaultTableModel model : sectorModels.values()) {
             model.setRowCount(0);
         }
@@ -177,20 +185,24 @@ public class StockDashboardUI extends JFrame {
                         return new StockQuote(symbol, "Error / Not Found", 0.0, 0.0, 0.0, 0.0, 0.0);
                     }
                 }).thenAcceptAsync(quote -> {
-                    double highDelta = quote.getFiftyTwoWeekHigh() != 0 ? ((quote.getCurrentPrice() - quote.getFiftyTwoWeekHigh()) / quote.getFiftyTwoWeekHigh()) * 100 : 0.0;
+                    double highDelta = quote.getFiftyTwoWeekHigh() != 0
+                            ? ((quote.getCurrentPrice() - quote.getFiftyTwoWeekHigh()) / quote.getFiftyTwoWeekHigh())
+                                    * 100
+                            : 0.0;
                     Object[] rowData = {
-                        quote.getSymbol(),
-                        quote.getName(),
-                        String.format("%.2f", quote.getCurrentPrice()),
-                        (quote.getChange() > 0 ? "+" : "") + String.format("%.2f", quote.getChange()),
-                        (quote.getPercentChange() > 0 ? "+" : "") + String.format("%.2f%%", quote.getPercentChange()),
-                        String.format("%.2f", quote.getFiftyTwoWeekHigh()),
-                        String.format("%.2f", quote.getFiftyTwoWeekLow()),
-                        String.format("%.2f%%", highDelta)
+                            quote.getSymbol(),
+                            quote.getName(),
+                            String.format("%.2f", quote.getCurrentPrice()),
+                            (quote.getChange() > 0 ? "+" : "") + String.format("%.2f", quote.getChange()),
+                            (quote.getPercentChange() > 0 ? "+" : "")
+                                    + String.format("%.2f%%", quote.getPercentChange()),
+                            String.format("%.2f", quote.getFiftyTwoWeekHigh()),
+                            String.format("%.2f", quote.getFiftyTwoWeekLow()),
+                            String.format("%.2f%%", highDelta)
                     };
                     model.addRow(rowData);
                 }, SwingUtilities::invokeLater);
-                
+
                 futures.add(future);
             }
         }

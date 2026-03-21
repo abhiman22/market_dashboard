@@ -243,12 +243,35 @@ body {
     transition: background 0.2s ease;
 }
 
-.market-table tbody tr {
-    transition: all 0.2s ease;
+.market-table tbody tr:not(.chart-row) {
+    cursor: pointer;
 }
 
-.market-table tbody tr:hover {
+.market-table tbody tr:hover:not(.chart-row) {
     background: rgba(255, 255, 255, 0.03);
+}
+
+.chart-row {
+    background: rgba(0, 0, 0, 0.15) !important;
+}
+
+.chart-row td {
+    padding: 0 !important;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.chart-container {
+    padding: 1.5rem;
+    height: 300px;
+    position: relative;
+}
+
+.chart-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: var(--text-secondary);
 }
 
 .right-align {

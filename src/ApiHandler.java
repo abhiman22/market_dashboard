@@ -39,6 +39,8 @@ public class ApiHandler implements HttpHandler {
             handleQuotes(exchange);
         } else if ("/api/search".equals(path)) {
             handleSearch(exchange);
+        } else if ("/api/chart".equals(path)) {
+            handleChart(exchange);
         } else {
             exchange.sendResponseHeaders(404, -1);
         }
@@ -102,9 +104,40 @@ public class ApiHandler implements HttpHandler {
         
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            sendJsonResponse(exchange, 200, response.body());
+            sendJsonResponse(exchange, response.statusCode(), response.body());
         } catch (InterruptedException e) {
             sendJsonResponse(exchange, 500, "{\"error\": \"Search interrupted\"}");
+        }
+    }
+
+    private void handleChart(HttpExchange exchange) throws IOException {
+        String query = exchange.getRequestURI().getQuery();
+        if (query == null || !query.contains("symbol=")) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing symbol parameter\"}");
+            return;
+        }
+        
+        String symbol = null;
+        String range = "1y";
+        for (String param : query.split("&")) {
+            String[] pair = param.split("=");
+            if (pair.length == 2) {
+                if ("symbol".equals(pair[0])) symbol = pair[1];
+                if ("range".equals(pair[0])) range = pair[1];
+            }
+        }
+
+        if (symbol == null) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing symbol parameter\"}");
+            return;
+        }
+
+        try {
+            String data = apiClient.getHistoricalData(symbol, range);
+            sendJsonResponse(exchange, 200, data);
+        } catch (Exception e) {
+            System.err.println("Chart API Error " + symbol + ": " + e.getMessage());
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + e.getMessage() + "\"}");
         }
     }
 
