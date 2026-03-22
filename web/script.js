@@ -2,7 +2,8 @@ const defaultState = {
     "Indices": {
         "Large Cap": ["^BSESN", "^NSEI"],
         "Mid Cap": ["BSE-MIDCAP.BO", "^NSEMDCP50"],
-        "Small Cap": ["BSE-SMLCAP.BO", "^NSEI"]
+        "Small Cap": ["BSE-SMLCAP.BO"],
+        "Sectorial Indices": ["^NSEBANK", "^CNXIT", "^CNXAUTO", "^CNXFMCG", "^CNXMETAL", "^CNXPHARMA", "^CNXREALTY"]
     },
     "Equities": {
         "Financials": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
@@ -150,57 +151,94 @@ async function fetchQuotes() {
         return;
     }
 
-    loadingOverlay.classList.add('active');
+    // Show overlay only on initial load or manual refresh
+    if (tableBody.innerHTML.includes('No symbols') || tableBody.innerHTML === '') {
+        loadingOverlay.classList.add('active');
+    }
+
     try {
         const queryParams = encodeURIComponent(symbols.join(','));
         const response = await fetch(`/api/quotes?symbols=${queryParams}`);
         if (!response.ok) throw new Error('Network error');
-        const quotes = await response.json();
+        let quotes = await response.json();
 
-        tableBody.innerHTML = '';
-        quotes.forEach((q, index) => {
-            const tr = document.createElement('tr');
+        // Sort quotes to match the original symbols order
+        const symbolsMap = new Map(symbols.map((s, i) => [s, i]));
+        quotes.sort((a, b) => (symbolsMap.get(a.symbol) ?? 999) - (symbolsMap.get(b.symbol) ?? 999));
 
-            const changeClass = getColorClass(q.change);
-            const deltaHigh = q.fiftyTwoWeekHigh !== 0 ? ((q.currentPrice - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh) * 100 : 0;
-            const deltaClass = getColorClass(deltaHigh);
-            const signStr = q.change > 0 ? '+' : '';
-            const deltaSignStr = deltaHigh > 0 ? '+' : '';
+        // Check if we need to do a structural update (rows added/removed/reordered)
+        const currentRows = Array.from(tableBody.querySelectorAll('tr:not(.chart-row)'));
+        const currentSymbols = currentRows.map(r => r.getAttribute('data-symbol'));
+        const needsStructuralUpdate = JSON.stringify(currentSymbols) !== JSON.stringify(symbols);
 
-            const isDefaultSymbol = defaultState[activeMainTab]?.[activeSubTab]?.includes(q.symbol);
-            const removeBtnHtml = isDefaultSymbol ? '<td style="color:#64748b; font-size:0.8rem; text-align:center;">Locked</td>' : `<td><button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button></td>`;
-
-            if (q.name === "Fallback") {
-                tr.innerHTML = `
-                    <td class="symbol-col">${q.symbol}</td>
-                    <td class="name-col val-red" colspan="7">Data Unavailable</td>
-                    ${removeBtnHtml}
-                `;
-            } else {
-                tr.innerHTML = `
-                    <td class="symbol-col">${q.symbol}</td>
-                    <td class="name-col">${q.name}</td>
-                    <td class="right-align price-col">${formatVal(q.currentPrice)}</td>
-                    <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change)}</td>
-                    <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.percentChange)}%</td>
-                    <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh)}</td>
-                    <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow)}</td>
-                    <td class="right-align price-col ${deltaClass}">${deltaSignStr}${formatVal(deltaHigh)}%</td>
-                    ${removeBtnHtml}
-                `;
-            }
-            tr.addEventListener('click', (e) => {
-                if (e.target.closest('.remove-btn')) return;
-                toggleChart(q.symbol, tr);
+        if (needsStructuralUpdate) {
+            // Save which symbol was active to re-expand if possible
+            const lastActiveSymbol = activeChartSymbol;
+            tableBody.innerHTML = '';
+            quotes.forEach((q) => {
+                const tr = createRow(q);
+                tableBody.appendChild(tr);
+                // If it was expanded, re-trigger? No, let's just do structural updates sparingly.
             });
-            tableBody.appendChild(tr);
-        });
+        } else {
+            // Smart update: Only change text and classes in existing rows
+            quotes.forEach((q) => {
+                const tr = tableBody.querySelector(`tr[data-symbol="${q.symbol}"]`);
+                if (tr) updateRow(tr, q);
+            });
+        }
 
     } catch (error) {
         console.error("Error fetching data:", error);
-        tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#ef4444; padding: 2rem;">Error fetching live data. Ensure server is running.</td></tr>`;
+        if (tableBody.innerHTML === '') {
+            tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#ef4444; padding: 2rem;">Error fetching live data. Ensure server is running.</td></tr>`;
+        }
     } finally {
         loadingOverlay.classList.remove('active');
+    }
+}
+
+function createRow(q) {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-symbol', q.symbol);
+    updateRow(tr, q);
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('.remove-btn')) return;
+        toggleChart(q.symbol, tr);
+    });
+    return tr;
+}
+
+function updateRow(tr, q) {
+    const changeClass = getColorClass(q.change);
+    const deltaHigh = q.fiftyTwoWeekHigh !== 0 ? ((q.currentPrice - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh) * 100 : 0;
+    const deltaClass = getColorClass(deltaHigh);
+    const signStr = q.change > 0 ? '+' : '';
+    const deltaSignStr = deltaHigh > 0 ? '+' : '';
+
+    const isDefaultSymbol = defaultState[activeMainTab]?.[activeSubTab]?.includes(q.symbol);
+    const removeBtnHtml = isDefaultSymbol ? 
+        '<td style="color:#64748b; font-size:0.8rem; text-align:center;">Locked</td>' : 
+        `<td><button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button></td>`;
+
+    if (q.name === "Fallback") {
+        tr.innerHTML = `
+            <td class="symbol-col">${q.symbol}</td>
+            <td class="name-col val-red" colspan="7">Data Unavailable</td>
+            ${removeBtnHtml}
+        `;
+    } else {
+        tr.innerHTML = `
+            <td class="symbol-col">${q.symbol}</td>
+            <td class="name-col">${q.name}</td>
+            <td class="right-align price-col">${formatVal(q.currentPrice)}</td>
+            <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change)}</td>
+            <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.percentChange)}%</td>
+            <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh)}</td>
+            <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow)}</td>
+            <td class="right-align price-col ${deltaClass}">${deltaSignStr}${formatVal(deltaHigh)}%</td>
+            ${removeBtnHtml}
+        `;
     }
 }
 
@@ -223,88 +261,195 @@ async function toggleChart(symbol, tr) {
 
     chartRow.innerHTML = `
         <td colspan="9">
-            <div class="chart-container">
-                <div id="loading-${canvasId}" class="chart-loading">
-                    <div class="spinner" style="width:24px; height:24px; margin-right:10px; margin-bottom:0;"></div>
-                    Loading 1-Year History...
+            <div class="details-grid">
+                <div class="chart-container">
+                    <div class="range-selector">
+                        <button class="range-btn" onclick="updateChart('${symbol}', '1d', '${canvasId}')">1D</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '5d', '${canvasId}')">5D</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '1mo', '${canvasId}')">1M</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '3mo', '${canvasId}')">3M</button>
+                        <button class="range-btn active" onclick="updateChart('${symbol}', '1y', '${canvasId}')">1Y</button>
+                    </div>
+                    <div id="loading-${canvasId}" class="chart-loading">
+                        <div class="spinner" style="width:24px; height:24px; margin-right:10px; margin-bottom:0;"></div>
+                        Loading 1-Year History...
+                    </div>
+                    <canvas id="${canvasId}" style="display:none;"></canvas>
                 </div>
-                <canvas id="${canvasId}" style="display:none;"></canvas>
+                <div class="news-section" id="news-${canvasId}">
+                    <div class="news-title">Related News</div>
+                    <div class="chart-loading">
+                        <div class="spinner" style="width:20px; height:20px; margin-right:10px; margin-bottom:0;"></div>
+                        Fetching News...
+                    </div>
+                </div>
             </div>
         </td>
     `;
     tr.after(chartRow);
     activeChartSymbol = symbol;
 
-    try {
-        const res = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=1y`);
-        if (!res.ok) throw new Error("Failed to fetch chart data");
-        const data = await res.json();
+    // Initial Chart and News Fetch
+    updateChart(symbol, '1y', canvasId);
+    
+    // Fetch News Data (passing name for Google News search)
+    const companyName = tr.querySelector('.name-col').textContent.trim();
+    fetch(`/api/news?symbol=${encodeURIComponent(symbol)}&name=${encodeURIComponent(companyName)}`)
+        .then(r => r.json())
+        .then(newsData => renderNews(newsData, canvasId));
+}
 
-        if (data.chart && data.chart.result && data.chart.result[0]) {
-            const result = data.chart.result[0];
+async function updateChart(symbol, range, canvasId) {
+    const loading = document.getElementById(`loading-${canvasId}`);
+    const canvas = document.getElementById(canvasId);
+    
+    // Update active button state
+    const container = loading.parentElement;
+    container.querySelectorAll('.range-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.toLowerCase().includes(range.replace('mo', 'm').toLowerCase()));
+    });
+
+    loading.style.display = 'flex';
+    loading.innerHTML = `<div class="spinner" style="width:24px; height:24px; margin-right:10px; margin-bottom:0;"></div> Loading ${range} History...`;
+    canvas.style.display = 'none';
+
+    try {
+        const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${range}`);
+        const chartData = await response.json();
+        
+        if (chartData.chart && chartData.chart.result && chartData.chart.result[0]) {
+            const result = chartData.chart.result[0];
             const timestamps = result.timestamp;
             const prices = result.indicators.quote[0].close;
 
-            const labels = timestamps.map(ts => new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' }));
+            const labels = timestamps.map(ts => {
+                const date = new Date(ts * 1000);
+                if (range === '1d' || range === '5d') {
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+                return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: range === '1y' ? '2-digit' : undefined });
+            });
 
-            document.getElementById(`loading-${canvasId}`).style.display = 'none';
-            const canvas = document.getElementById(canvasId);
+            // Filter out null prices and get trend
+            const validPrices = prices.filter(p => p !== null && p !== undefined);
+            const isUp = validPrices.length >= 2 ? validPrices[validPrices.length - 1] >= validPrices[0] : true;
+
+            renderChart(canvasId, labels, prices, symbol, range, isUp);
+            loading.style.display = 'none';
             canvas.style.display = 'block';
+        }
+    } catch (error) {
+        loading.innerHTML = `<span style="color:var(--val-red)">Error loading chart data.</span>`;
+    }
+}
 
-            const ctx = canvas.getContext('2d');
-            const isUp = prices[prices.length - 1] >= prices[0];
-            const color = isUp ? '#10b981' : '#ef4444';
+function renderNews(newsData, canvasId) {
+    const newsContainer = document.getElementById(`news-${canvasId}`);
+    let sentimentHtml = '';
+    if (newsData && newsData.lexicon) {
+        const l = newsData.lexicon;
+        const badgeClass = `badge-${l.recommendation.toLowerCase()}`;
+        sentimentHtml = `
+            <div class="sentiment-card">
+                <div class="sentiment-header">
+                    <span class="sentiment-title">AI Market Insights (Beta)</span>
+                    <span class="sentiment-badge ${badgeClass}">${l.recommendation}</span>
+                </div>
+                <div class="sentiment-summary">${l.summary}</div>
+            </div>
+        `;
+    }
 
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Price (₹)',
-                        data: prices,
-                        borderColor: color,
-                        backgroundColor: color + '1a',
-                        fill: true,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        tension: 0.1
-                    }]
+    if (newsData && newsData.news && newsData.news.length > 0) {
+        let newsHtml = sentimentHtml + '<div class="news-title">Related News</div>';
+        newsData.news.forEach(item => {
+            newsHtml += `
+                <a href="${item.link}" target="_blank" class="news-item">
+                    <div class="news-headline">${item.title}</div>
+                    <div class="news-meta">
+                        <span>${item.publisher}</span>
+                        <span>${item.date}</span>
+                    </div>
+                </a>
+            `;
+        });
+        newsContainer.innerHTML = newsHtml;
+    } else {
+        newsContainer.innerHTML = sentimentHtml + '<div class="news-title">Related News</div><div style="color:var(--text-secondary); font-size:0.85rem; padding:1rem;">No news available for this symbol.</div>';
+    }
+}
+
+function renderChart(canvasId, labels, prices, symbol, range, isUp) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    
+    // Destroy existing chart if any
+    const existingChart = Chart.getChart(canvasId);
+    if (existingChart) existingChart.destroy();
+
+    const trendColor = isUp ? '#10b981' : '#ef4444';
+    const fillAlpha = '33'; // 0.2 roughly in hex
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, trendColor + fillAlpha);
+    gradient.addColorStop(1, trendColor + '00');
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `${symbol} Price`,
+                data: prices,
+                borderColor: trendColor,
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                fill: true,
+                backgroundColor: gradient,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleColor: '#94a3b8',
+                    bodyColor: '#f1f5f9',
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: false
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { display: false },
+                    ticks: {
+                        color: '#64748b',
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: (range === '1d' || range === '5d') ? 12 : 8
+                    }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: '#1e293b',
-                            titleColor: '#fff',
-                            bodyColor: '#cbd5e1',
-                            borderColor: 'rgba(255,255,255,0.1)',
-                            borderWidth: 1
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            grid: { display: false },
-                            ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
-                        },
-                        y: {
-                            display: true,
-                            grid: { color: 'rgba(255,255,255,0.05)' },
-                            ticks: { color: '#64748b' }
+                y: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: {
+                        color: '#64748b',
+                        callback: function(value) {
+                            return value.toLocaleString('en-IN');
                         }
                     }
                 }
-            });
+            }
         }
-    } catch (err) {
-        console.error("Chart Error:", err);
-        document.getElementById(`loading-${canvasId}`).innerHTML = `<span style="color:#ef4444">Failed to load historical data</span>`;
-    }
+    });
 }
 
 window.removeSymbol = function (symbol) {
@@ -383,7 +528,9 @@ document.addEventListener('click', (e) => {
 
 refreshBtn.addEventListener('click', fetchQuotes);
 
+const REFRESH_INTERVAL = 30000; // 30 seconds
+
 // Boot
 renderTabs();
 fetchQuotes();
-setInterval(fetchQuotes, 60000);
+setInterval(fetchQuotes, REFRESH_INTERVAL);

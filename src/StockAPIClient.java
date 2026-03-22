@@ -5,7 +5,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 
 public class StockAPIClient {
     private static final String API_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
@@ -65,8 +67,12 @@ public class StockAPIClient {
     }
 
     public String getHistoricalData(String symbol, String range) throws IOException, InterruptedException {
-        String encodedSymbol = java.net.URLEncoder.encode(symbol, java.nio.charset.StandardCharsets.UTF_8);
-        String url = API_URL + encodedSymbol + "?range=" + range + "&interval=1d";
+        String encodedSymbol = java.net.URLEncoder.encode(symbol, StandardCharsets.UTF_8);
+        String interval = "1d";
+        if ("1d".equals(range)) interval = "1m";
+        else if ("5d".equals(range)) interval = "15m";
+        
+        String url = API_URL + encodedSymbol + "?range=" + range + "&interval=" + interval;
         
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -81,5 +87,23 @@ public class StockAPIClient {
         }
         
         throw new IOException("Failed to get historical data for " + symbol + ". Status code: " + response.statusCode());
+    }
+    
+    public CompletableFuture<HttpResponse<String>> sendAsyncRequest(HttpRequest request) {
+        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    public String searchSymbols(String query) throws IOException, InterruptedException {
+        String encodedQuery = java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
+        String url = "https://query2.finance.yahoo.com/v1/finance/search?q=" + encodedQuery + "&quotesCount=10&newsCount=0&enableFuzzyQuery=false&quotesQueryId=tss_quote_search_api&multiQuoteQueryId=tss_multi_quote_search_api&enableCb=true&enableNavLinks=true&enableEnhancedTrivialQuery=true";
+        
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", "Mozilla/5.0")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
     }
 }

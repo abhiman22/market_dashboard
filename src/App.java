@@ -11,7 +11,8 @@ public class App {
         server.createContext("/", new StaticFileHandler());
         
         // API Endpoint for stock data
-        server.createContext("/api/", new ApiHandler());
+        StockAPIClient apiClient = new StockAPIClient();
+        server.createContext("/api/", new ApiHandler(apiClient));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();

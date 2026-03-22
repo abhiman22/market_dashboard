@@ -30,7 +30,8 @@ public class StockDashboardUI extends JFrame {
     }
 
     private void setupData() {
-        sectorSymbols.put("Indices", new ArrayList<>(List.of("LRGCAP.BO", "^NSEI", "BSE-MIDCAP.BO", "BSE-SMLCAP.BO")));
+        sectorSymbols.put("Indices", new ArrayList<>(List.of("LRGCAP.BO", "^NSEI", "BSE-MIDCAP.BO", "BSE-SMLCAP.BO",
+                "^NSEBANK", "^CNXIT", "^CNXAUTO", "^CNXFMCG", "^CNXMETAL", "^CNXPHARMA", "^CNXREALTY")));
         sectorSymbols.put("Financials", new ArrayList<>(List.of("HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS",
                 "KOTAKBANK.NS", "AXISBANK.NS", "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS")));
         sectorSymbols.put("IT", new ArrayList<>(List.of("TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS")));
