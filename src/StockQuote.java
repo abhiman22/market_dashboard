@@ -6,8 +6,9 @@ public class StockQuote {
     private double percentChange;
     private double fiftyTwoWeekHigh;
     private double fiftyTwoWeekLow;
+    private String currency;
 
-    public StockQuote(String symbol, String name, double currentPrice, double change, double percentChange, double fiftyTwoWeekHigh, double fiftyTwoWeekLow) {
+    public StockQuote(String symbol, String name, double currentPrice, double change, double percentChange, double fiftyTwoWeekHigh, double fiftyTwoWeekLow, String currency) {
         this.symbol = symbol;
         this.name = name;
         this.currentPrice = currentPrice;
@@ -15,6 +16,7 @@ public class StockQuote {
         this.percentChange = percentChange;
         this.fiftyTwoWeekHigh = fiftyTwoWeekHigh;
         this.fiftyTwoWeekLow = fiftyTwoWeekLow;
+        this.currency = currency != null ? currency : "INR";
     }
 
     public String getSymbol() { return symbol; }
@@ -24,6 +26,7 @@ public class StockQuote {
     public double getPercentChange() { return percentChange; }
     public double getFiftyTwoWeekHigh() { return fiftyTwoWeekHigh; }
     public double getFiftyTwoWeekLow() { return fiftyTwoWeekLow; }
+    public String getCurrency() { return currency; }
 
     @Override
     public String toString() {

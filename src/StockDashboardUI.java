@@ -183,7 +183,7 @@ public class StockDashboardUI extends JFrame {
                         return apiClient.getQuote(symbol);
                     } catch (Exception e) {
                         System.err.println("Error fetching " + symbol + ": " + e.getMessage());
-                        return new StockQuote(symbol, "Error / Not Found", 0.0, 0.0, 0.0, 0.0, 0.0);
+                        return new StockQuote(symbol, "Error / Not Found", 0.0, 0.0, 0.0, 0.0, 0.0, null);
                     }
                 }).thenAcceptAsync(quote -> {
                     double highDelta = quote.getFiftyTwoWeekHigh() != 0

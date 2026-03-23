@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BSE / NSE - Market Dashboard</title>
+    <title>Market Insights Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
     <div class="app-container">
         <header class="header">
             <div>
-                <h1 class="gradient-text">Market Dashboard</h1>
+                <h1 class="gradient-text">Market Insights Dashboard</h1>
                 <p class="subtitle">Real-time Tracker with Cap Indices & Sectors</p>
             </div>
             <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
@@ -38,6 +38,10 @@
         </header>
 
         <div class="glass-panel">
+            <div class="market-status-bar" id="market-status-bar">
+                <!-- Status badges injected here -->
+            </div>
+
             <div class="main-tabs-container" id="main-tabs-container">
                 <!-- Main tabs -->
             </div>
@@ -55,19 +59,50 @@
                         <tr>
                             <th>Symbol</th>
                             <th>Company</th>
-                            <th class="right-align">Price (₹)</th>
+                            <th class="right-align">Price</th>
                             <th class="right-align">Change</th>
                             <th class="right-align">% Change</th>
                             <th class="right-align">52W High</th>
                             <th class="right-align">52W Low</th>
                             <th class="right-align">Δ 52W High</th>
-                            <th></th> <!-- For delete button -->
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
                         <!-- Rows -->
                     </tbody>
                 </table>
+            </div>
+
+            <div id="overview-extras" class="overview-extras">
+                <div class="collapsible-section">
+                    <div class="collapsible-header" onclick="toggleSection('news-section-body')">
+                        <div class="collapsible-title-group">
+                            <h2>Breaking Market News</h2>
+                            <span class="live-indicator">LIVE</span>
+                        </div>
+                        <span class="chevron" id="chevron-news-section-body">▾</span>
+                    </div>
+                    <div class="collapsible-body open" id="news-section-body">
+                        <div id="breaking-news-content" class="collapsible-content">
+                            <!-- News items -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="collapsible-section">
+                    <div class="collapsible-header" onclick="toggleSection('events-section-body')">
+                        <div class="collapsible-title-group">
+                            <h2>Upcoming Events</h2>
+                        </div>
+                        <span class="chevron" id="chevron-events-section-body">▾</span>
+                    </div>
+                    <div class="collapsible-body open" id="events-section-body">
+                        <div id="calendar-content" class="collapsible-content">
+                            <!-- Calendar items -->
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

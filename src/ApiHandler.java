@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,7 +19,12 @@ import java.util.stream.Collectors;
 
 public class ApiHandler implements HttpHandler {
     private final StockAPIClient apiClient;
-    private final Gson gson = new Gson();
+    private static final Gson gson = new Gson();
+    
+    // In-memory cache for quotes (Symbol -> StockQuote)
+    private static final Map<String, StockQuote> quoteCache = new ConcurrentHashMap<>();
+    private static final Map<String, Long> cacheTimestamps = new ConcurrentHashMap<>();
+    private static final long CACHE_EXPIRY_MS = 60000; // 1 minute fresh, but keep stale indefinitely for UI stability
     private static final DateTimeFormatter RSS_DATE_FORMATTER = DateTimeFormatter.RFC_1123_DATE_TIME;
     private static final Set<String> TRUSTED_SOURCES = Set.of(
         "mint", "the economic times", "business standard", "reuters", "bloomberg", 
@@ -26,8 +32,44 @@ public class ApiHandler implements HttpHandler {
         "ndtv profit", "finshot", "the hindu business line"
     );
 
+    // Commodities Localization Constants
+    private static final String GOLD_SYMBOL = "XAUINR=X";
+    private static final String SILVER_SYMBOL = "XAGINR=X";
+    private static final double TROY_OZ_TO_G = 31.1034768;
+    private static final double GOLD_UNIT_G = 10.0; // 10 grams
+    private static final double SILVER_UNIT_G = 1000.0; // 1 kg
+
     public ApiHandler(StockAPIClient apiClient) {
         this.apiClient = apiClient;
+    }
+
+    private StockQuote localizeMetal(StockQuote q) {
+        if (q == null) return null;
+        if (!GOLD_SYMBOL.equals(q.getSymbol()) && !SILVER_SYMBOL.equals(q.getSymbol())) {
+            return q;
+        }
+
+        double factor = 1.0;
+        String newName = q.getName();
+        
+        if (GOLD_SYMBOL.equals(q.getSymbol())) {
+            factor = (GOLD_UNIT_G / TROY_OZ_TO_G); // Already in INR
+            newName = "Gold (10g)";
+        } else if (SILVER_SYMBOL.equals(q.getSymbol())) {
+            factor = (SILVER_UNIT_G / TROY_OZ_TO_G); // Already in INR
+            newName = "Silver (1kg)";
+        }
+
+        return new StockQuote(
+            q.getSymbol(),
+            newName,
+            q.getCurrentPrice() * factor,
+            q.getChange() * factor,
+            q.getPercentChange(),
+            q.getFiftyTwoWeekHigh() * factor,
+            q.getFiftyTwoWeekLow() * factor,
+            "INR"
+        );
     }
 
     @Override
@@ -45,45 +87,85 @@ public class ApiHandler implements HttpHandler {
 
         if ("/api/quotes".equals(path)) {
             handleQuotes(exchange);
-        } else if (path.equals("/api/quotes")) {
-            handleQuotes(exchange);
-        } else if (path.equals("/api/chart")) {
+        } else if ("/api/chart".equals(path)) {
             handleChart(exchange);
-        } else if (path.equals("/api/news")) {
+        } else if ("/api/news".equals(path)) {
             handleNews(exchange);
-        } else if (path.equals("/api/search")) {
+        } else if ("/api/search".equals(path)) {
             handleSearch(exchange);
+        } else if ("/api/calendar".equals(path)) {
+            handleCalendar(exchange);
         } else {
+            // No static handler needed since App handles it, but for safety:
             exchange.sendResponseHeaders(404, -1);
         }
     }
 
+    private void handleCalendar(HttpExchange exchange) throws IOException {
+        String json = "{\"earnings\": [" +
+            "{\"company\": \"TCS\", \"date\": \"Apr 12\", \"impact\": \"HIGH\"}," +
+            "{\"company\": \"Reliance\", \"date\": \"Apr 18\", \"impact\": \"MEDIUM\"}," +
+            "{\"company\": \"HDFCBANK\", \"date\": \"Apr 20\", \"impact\": \"HIGH\"}" +
+            "], \"ipos\": [" +
+            "{\"company\": \"SolarGrid\", \"date\": \"May 02\", \"status\": \"ANNOUNCED\"}" +
+            "]}";
+        sendJsonResponse(exchange, 200, json);
+    }
+
     private void handleQuotes(HttpExchange exchange) throws IOException {
         String query = exchange.getRequestURI().getQuery();
-        if (query == null || !query.startsWith("symbols=")) {
+        if (query == null || !query.contains("symbols=")) {
             sendJsonResponse(exchange, 400, "{\"error\": \"Missing symbols parameter\"}");
             return;
         }
         
-        String symbolsParam = query.substring("symbols=".length());
-        String[] symbols = symbolsParam.split(",");
+        String symbolsParam = null;
+        for (String param : query.split("&")) {
+            if (param.startsWith("symbols=")) {
+                symbolsParam = param.substring("symbols=".length());
+            }
+        }
         
-        List<StockQuote> quotes = Collections.synchronizedList(new ArrayList<>());
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        if (symbolsParam == null) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing symbols parameter\"}");
+            return;
+        }
 
-        for (String symbol : symbols) {
+        String decodedSymbols = java.net.URLDecoder.decode(symbolsParam, StandardCharsets.UTF_8);
+        String[] symbolsArr = decodedSymbols.split(",");
+        
+        List<StockQuote> quotesList = Collections.synchronizedList(new ArrayList<>());
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        long now = System.currentTimeMillis();
+
+        for (String symbol : symbolsArr) {
             String trimmed = symbol.trim();
             if (trimmed.isEmpty()) continue;
             
-            CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
+            // Check fresh cache
+            if (quoteCache.containsKey(trimmed) && (now - cacheTimestamps.getOrDefault(trimmed, 0L) < CACHE_EXPIRY_MS)) {
+                quotesList.add(quoteCache.get(trimmed));
+                continue;
+            }
+
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
-                    return apiClient.getQuote(trimmed);
+                    StockQuote q = apiClient.getQuote(trimmed);
+                    // Localization for metals
+                    q = localizeMetal(q);
+                    
+                    quoteCache.put(trimmed, q);
+                    cacheTimestamps.put(trimmed, System.currentTimeMillis());
+                    quotesList.add(q);
                 } catch (Exception e) {
                     System.err.println("API Error " + trimmed + ": " + e.getMessage());
-                    return new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0);
+                    // Fallback to stale data if available
+                    if (quoteCache.containsKey(trimmed)) {
+                        quotesList.add(quoteCache.get(trimmed));
+                    } else {
+                        quotesList.add(new StockQuote(trimmed, "Data Unavailable", 0.0, 0.0, 0.0, 0.0, 0.0, null));
+                    }
                 }
-            }).thenAccept(quote -> {
-                quotes.add(quote);
             });
             futures.add(future);
         }
@@ -94,7 +176,7 @@ public class ApiHandler implements HttpHandler {
             e.printStackTrace();
         }
 
-        sendJsonResponse(exchange, 200, gson.toJson(quotes));
+        sendJsonResponse(exchange, 200, gson.toJson(quotesList));
     }
 
     private void handleChart(HttpExchange exchange) throws IOException {
@@ -107,9 +189,9 @@ public class ApiHandler implements HttpHandler {
         String symbol = null;
         String range = "1y";
         for (String param : query.split("&")) {
-            String[] pair = param.split("=");
+            String[] pair = param.split("=", 2); // Limit to 2 parts
             if (pair.length == 2) {
-                if ("symbol".equals(pair[0])) symbol = pair[1];
+                if ("symbol".equals(pair[0])) symbol = java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
                 if ("range".equals(pair[0])) range = pair[1];
             }
         }
@@ -121,6 +203,41 @@ public class ApiHandler implements HttpHandler {
 
         try {
             String data = apiClient.getHistoricalData(symbol, range);
+            
+            // If it's a metal, scale the historical data to units (already in INR)
+            if (GOLD_SYMBOL.equals(symbol) || SILVER_SYMBOL.equals(symbol)) {
+                double factor = GOLD_SYMBOL.equals(symbol) ? 
+                               (GOLD_UNIT_G / TROY_OZ_TO_G) : 
+                               (SILVER_UNIT_G / TROY_OZ_TO_G);
+
+                com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(data).getAsJsonObject();
+                if (json.has("chart")) {
+                    com.google.gson.JsonObject chart = json.getAsJsonObject("chart");
+                    if (chart.has("result") && !chart.get("result").isJsonNull()) {
+                        com.google.gson.JsonObject result = chart.getAsJsonArray("result").get(0).getAsJsonObject();
+                        com.google.gson.JsonObject indicators = result.getAsJsonObject("indicators");
+                        com.google.gson.JsonArray quotes = indicators.getAsJsonArray("quote");
+                        
+                        if (quotes.size() > 0) {
+                            com.google.gson.JsonObject quoteObj = quotes.get(0).getAsJsonObject();
+                            if (quoteObj.has("close")) {
+                                com.google.gson.JsonArray closeArr = quoteObj.getAsJsonArray("close");
+                                com.google.gson.JsonArray newClose = new com.google.gson.JsonArray();
+                                for (com.google.gson.JsonElement e : closeArr) {
+                                    if (e.isJsonNull()) {
+                                        newClose.add(com.google.gson.JsonNull.INSTANCE);
+                                    } else {
+                                        newClose.add(e.getAsDouble() * factor);
+                                    }
+                                }
+                                quoteObj.add("close", newClose);
+                            }
+                        }
+                    }
+                }
+                data = gson.toJson(json);
+            }
+            
             sendJsonResponse(exchange, 200, data);
         } catch (Exception e) {
             System.err.println("Chart API Error " + symbol + ": " + e.getMessage());
@@ -153,32 +270,40 @@ public class ApiHandler implements HttpHandler {
 
     private void handleNews(HttpExchange exchange) throws IOException {
         String query = exchange.getRequestURI().getQuery();
-        if (query == null || !query.contains("symbol=")) {
-            sendJsonResponse(exchange, 400, "{\"error\": \"Missing symbol parameter\"}");
-            return;
-        }
-        String symbol = query.split("symbol=")[1].split("&")[0];
-        String name = query.contains("name=") ? query.split("name=")[1].split("&")[0] : symbol;
+        String symbol = null;
+        String name = "Stock Market Breaking News";
         
-        String encodedSym = java.net.URLEncoder.encode(symbol, StandardCharsets.UTF_8);
+        if (query != null && query.contains("symbol=")) {
+            symbol = query.split("symbol=")[1].split("&")[0];
+            name = query.contains("name=") ? query.split("name=")[1].split("&")[0] : symbol;
+        }
+
         String decodedName = java.net.URLDecoder.decode(name, StandardCharsets.UTF_8);
-        String encodedName = java.net.URLEncoder.encode(decodedName + " stock news", StandardCharsets.UTF_8);
-
-        // Source 1: Yahoo Finance RSS
-        String yahooUrl = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + encodedSym;
-        // Source 2: Google News Aggregate RSS
+        String encodedName = java.net.URLEncoder.encode(decodedName + (symbol != null ? " stock news" : ""), StandardCharsets.UTF_8);
+        
+        // Source 1: Yahoo Finance RSS (only if symbol exists)
+        String yahooUrl = symbol != null ? "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + symbol : null;
+        // Source 2: Google News Aggregate RSS (Search based)
         String googleUrl = "https://news.google.com/rss/search?q=" + encodedName + "&hl=en-IN&gl=IN&ceid=IN:en";
-
-        HttpRequest yahooReq = HttpRequest.newBuilder().uri(URI.create(yahooUrl)).header("User-Agent", "Mozilla/5.0").build();
+        
         HttpRequest googleReq = HttpRequest.newBuilder().uri(URI.create(googleUrl)).header("User-Agent", "Mozilla/5.0").build();
-
-        CompletableFuture<HttpResponse<String>> yahooFuture = apiClient.sendAsyncRequest(yahooReq);
         CompletableFuture<HttpResponse<String>> googleFuture = apiClient.sendAsyncRequest(googleReq);
+        
+        CompletableFuture<HttpResponse<String>> yahooFuture = null;
+        if (yahooUrl != null) {
+            HttpRequest yahooReq = HttpRequest.newBuilder().uri(URI.create(yahooUrl)).header("User-Agent", "Mozilla/5.0").build();
+            yahooFuture = apiClient.sendAsyncRequest(yahooReq);
+        }
 
-        CompletableFuture.allOf(yahooFuture, googleFuture).thenAccept(v -> {
+        CompletableFuture<Void> allFutures = yahooFuture != null ? CompletableFuture.allOf(yahooFuture, googleFuture) : CompletableFuture.allOf(googleFuture);
+
+        final CompletableFuture<HttpResponse<String>> finalYahooFuture = yahooFuture;
+        allFutures.thenAccept(v -> {
             try {
                 List<NewsItem> allItems = new ArrayList<>();
-                allItems.addAll(parseRssItems(yahooFuture.join().body(), "Yahoo Finance", 10));
+                if (finalYahooFuture != null) {
+                    allItems.addAll(parseRssItems(finalYahooFuture.join().body(), "Yahoo Finance", 10));
+                }
                 allItems.addAll(parseRssItems(googleFuture.join().body(), "Google News", 15));
 
                 // Filter by Trusted Sources, Deduplicate by Title, and Sort by Date
