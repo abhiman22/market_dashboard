@@ -33,19 +33,19 @@ const defaultState = {
 
 // Table header HTML for stock tabs vs MF tab
 const STOCK_TABLE_HEAD = `<tr>
-    <th>Symbol</th><th>Company</th>
+    <th>Sym</th><th>Company</th>
     <th class="right-align">Price</th><th class="right-align">Change</th>
-    <th class="right-align">% Change</th><th class="right-align">52W High</th>
-    <th class="right-align">52W Low</th><th class="right-align">Δ 52W High</th>
+    <th class="right-align">52W H</th>
+    <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
     <th></th></tr>`;
 
 const MF_TABLE_HEAD = `<tr>
     <th>Code</th><th>Scheme</th>
     <th class="right-align">NAV (₹)</th>
-    <th class="right-align">Change</th><th class="right-align">% Change</th>
+    <th class="right-align">Change</th>
     <th class="right-align">1Y CAGR</th><th class="right-align">3Y CAGR</th>
-    <th class="right-align">52W High</th><th class="right-align">52W Low</th><th class="right-align">Δ 52W High</th>
-    <th class="right-align">NAV Date</th><th></th></tr>`;
+    <th class="right-align">52W H</th><th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th></th></tr>`;
 
 // Deep merge local storage with default state to ensure we always have the defaults
 let savedState = JSON.parse(localStorage.getItem('vanguardState')) || {};
@@ -283,13 +283,13 @@ function updateRow(tr, q) {
 
     const isDefaultSymbol = defaultState[activeMainTab]?.[activeSubTab]?.includes(q.symbol);
     const removeBtnHtml = isDefaultSymbol ?
-        '<td style="color:#64748b; font-size:0.8rem; text-align:center;">Locked</td>' :
+        '<td></td>' :
         `<td><button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button></td>`;
 
     if (q.name === "Fallback") {
         tr.innerHTML = `
             <td class="symbol-col">${q.symbol}</td>
-            <td class="name-col val-red" colspan="7">Data Unavailable</td>
+            <td class="name-col val-red" colspan="6">Data Unavailable</td>
             ${removeBtnHtml}
         `;
     } else {
@@ -297,8 +297,7 @@ function updateRow(tr, q) {
             <td class="symbol-col">${q.symbol}</td>
             <td class="name-col">${q.name}</td>
             <td class="right-align price-col">${formatVal(q.currentPrice, q.currency)}</td>
-            <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change, q.currency)}</td>
-            <td class="right-align price-col ${changeClass}">${signStr}${q.percentChange.toFixed(2)}%</td>
+            <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change, q.currency)} <span style="opacity:0.7">${signStr}${q.percentChange.toFixed(2)}%</span></td>
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
             <td class="right-align price-col ${deltaClass}">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
@@ -849,14 +848,12 @@ function createMFRow(mf) {
         <td class="symbol-col" style="font-size:0.8rem; color:var(--text-secondary);">${mf.schemeCode}</td>
         <td class="mf-scheme-name" title="${escapeAttr(mf.schemeName)}">${displayName}</td>
         <td class="right-align price-col">₹${navFmt}</td>
-        <td class="right-align price-col ${changeClass}">${changeFmt}</td>
-        <td class="right-align price-col ${changeClass}">${pctFmt}</td>
+        <td class="right-align price-col ${changeClass}">${changeFmt} <span style="opacity:0.7">${pctFmt}</span></td>
         <td class="right-align price-col">${fmtCagr(mf.cagr1y)}</td>
         <td class="right-align price-col">${fmtCagr(mf.cagr3y)}</td>
         <td class="right-align price-col">${high52Fmt}</td>
         <td class="right-align price-col">${low52Fmt}</td>
         <td class="right-align price-col ${deltaHighClass}">${deltaHighFmt}</td>
-        <td class="right-align name-col" style="font-size:0.85rem;">${mf.navDate}</td>
         <td></td>
     `;
 

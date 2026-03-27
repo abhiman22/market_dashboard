@@ -266,7 +266,7 @@ body {
 
 .market-table th {
     text-align: left;
-    padding: 1rem 1.5rem;
+    padding: 0.65rem 1rem;
     color: var(--text-secondary);
     font-size: 0.85rem;
     font-weight: 500;
@@ -277,7 +277,7 @@ body {
 }
 
 .market-table td {
-    padding: 1.25rem 1.5rem;
+    padding: 0.75rem 1rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     font-size: 0.95rem;
     transition: background 0.2s ease;
