@@ -98,21 +98,47 @@
                 </div>
 
                 <div class="collapsible-section">
-                    <div class="collapsible-header" onclick="toggleSection('events-section-body')">
+                    <div class="collapsible-header" onclick="toggleSection('live-tv-body')">
                         <div class="collapsible-title-group">
-                            <h2>Upcoming Events</h2>
+                            <h2>Live TV</h2>
+                            <span class="live-indicator">LIVE</span>
                         </div>
-                        <span class="chevron" id="chevron-events-section-body">▾</span>
+                        <span class="chevron" id="chevron-live-tv-body">▾</span>
                     </div>
-                    <div class="collapsible-body open" id="events-section-body">
-                        <div id="calendar-content" class="collapsible-content">
-                            <!-- Calendar items -->
+                    <div class="collapsible-body open" id="live-tv-body">
+                        <div class="collapsible-content">
+                            <div class="live-tv-controls">
+                                <div class="live-tv-channel-pills" id="live-tv-channel-pills"></div>
+                            </div>
+                            <div class="live-tv-embed-container">
+                                <div class="live-tv-placeholder" id="live-tv-placeholder">▶ Select a channel above to start watching</div>
+                                <iframe id="live-tv-iframe" src="" frameborder="0" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+    <!-- MF Compare Bar -->
+    <div id="mf-compare-bar" class="mf-compare-bar" style="display:none;">
+        <span id="mf-compare-count"></span>
+        <button id="mf-compare-btn">Compare</button>
+        <button id="mf-compare-clear">✕ Clear</button>
+    </div>
+
+    <!-- MF Compare Modal -->
+    <div id="mf-compare-modal" class="mf-compare-modal" style="display:none;">
+        <div class="mf-compare-backdrop"></div>
+        <div class="mf-compare-dialog">
+            <div class="mf-compare-dialog-header">
+                <h2>Fund Comparison</h2>
+                <button id="mf-compare-close">✕</button>
+            </div>
+            <div class="mf-compare-dialog-body" id="mf-compare-dialog-body"></div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 

@@ -27,6 +27,11 @@ public class ApiHandler implements HttpHandler {
     private static final Map<String, StockQuote> quoteCache = new ConcurrentHashMap<>();
     private static final Map<String, Long> cacheTimestamps = new ConcurrentHashMap<>();
     private static final long CACHE_EXPIRY_MS = 60000; // 1 minute fresh, but keep stale indefinitely for UI stability
+
+    // In-memory cache for YouTube live stream video IDs (channelId -> videoId)
+    private static final Map<String, String> liveStreamCache = new ConcurrentHashMap<>();
+    private static final Map<String, Long> liveStreamCacheTimestamps = new ConcurrentHashMap<>();
+    private static final long LIVE_STREAM_CACHE_MS = 30 * 60 * 1000L; // 30 minutes
     private static final DateTimeFormatter RSS_DATE_FORMATTER = DateTimeFormatter.RFC_1123_DATE_TIME;
     private static final Set<String> TRUSTED_SOURCES = Set.of(
         // Indian sources
@@ -73,11 +78,11 @@ public class ApiHandler implements HttpHandler {
         "large-cap",  Arrays.asList("HDFC", "Nippon India", "ICICI Prudential", "SBI", "Kotak",
                                     "Mirae Asset", "Axis", "UTI", "Canara Robeco", "Franklin India"),
         "mid-cap",    Arrays.asList("HDFC", "Nippon India", "Kotak", "SBI", "Axis",
-                                    "Tata", "DSP", "Mirae Asset", "Franklin India"),
+                                    "Tata", "DSP", "Mirae Asset", "Franklin India", "UTI"),
         "small-cap",  Arrays.asList("Nippon India", "SBI", "HDFC", "Kotak", "Axis",
-                                    "Tata", "DSP", "Franklin India"),
+                                    "Tata", "DSP", "Franklin India", "Mirae Asset", "UTI"),
         "flexi-cap",  Arrays.asList("HDFC", "Parag Parikh", "Kotak", "Franklin India",
-                                    "UTI", "SBI", "Axis", "DSP")
+                                    "UTI", "SBI", "Axis", "DSP", "Mirae Asset", "Nippon India")
     );
 
     public ApiHandler(StockAPIClient apiClient, MFApiClient mfApiClient) {
@@ -137,6 +142,8 @@ public class ApiHandler implements HttpHandler {
             handleSearch(exchange);
         } else if ("/api/calendar".equals(path)) {
             handleCalendar(exchange);
+        } else if ("/api/live-stream".equals(path)) {
+            handleLiveStream(exchange);
         } else if (path.startsWith("/api/mf")) {
             handleMF(exchange, path);
         } else {
@@ -578,7 +585,7 @@ public class ApiHandler implements HttpHandler {
     }
 
     /**
-     * Returns top-5 Direct-Growth schemes for a category, sorted by AMC priority.
+     * Returns top-10 Direct-Growth schemes for a category, sorted by AMC priority.
      * Searches per AMC in parallel using /mf/search (reliable), then fetches /latest NAV.
      */
     private void handleMFCategory(HttpExchange exchange, String queryStr) throws IOException {
@@ -618,10 +625,10 @@ public class ApiHandler implements HttpHandler {
 
             CompletableFuture.allOf(searchFutures.toArray(new CompletableFuture[0])).join();
 
-            // Collect codes in AMC priority order, up to 5
+            // Collect codes in AMC priority order, up to 10
             List<Integer> codes = new ArrayList<>();
             for (CompletableFuture<Optional<Integer>> f : searchFutures) {
-                if (codes.size() >= 5) break;
+                if (codes.size() >= 10) break;
                 f.join().ifPresent(codes::add);
             }
 
@@ -736,6 +743,76 @@ public class ApiHandler implements HttpHandler {
             .collect(Collectors.toList());
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         return results;
+    }
+
+    private void handleLiveStream(HttpExchange exchange) throws IOException {
+        String query = exchange.getRequestURI().getQuery();
+        String channelId = null;
+        if (query != null) {
+            for (String param : query.split("&")) {
+                String[] pair = param.split("=", 2);
+                if (pair.length == 2 && "channelId".equals(pair[0])) {
+                    channelId = pair[1];
+                }
+            }
+        }
+        if (channelId == null || channelId.isEmpty()) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing channelId parameter\"}");
+            return;
+        }
+
+        String apiKey = System.getenv("YOUTUBE_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            sendJsonResponse(exchange, 503, "{\"error\": \"YOUTUBE_API_KEY not configured\"}");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (liveStreamCache.containsKey(channelId) &&
+                (now - liveStreamCacheTimestamps.getOrDefault(channelId, 0L)) < LIVE_STREAM_CACHE_MS) {
+            sendJsonResponse(exchange, 200, "{\"videoId\": \"" + escapeJson(liveStreamCache.get(channelId)) + "\"}");
+            return;
+        }
+
+        try {
+            String url = "https://www.googleapis.com/youtube/v3/search"
+                    + "?part=id"
+                    + "&channelId=" + channelId
+                    + "&eventType=live"
+                    + "&type=video"
+                    + "&maxResults=1"
+                    + "&key=" + apiKey;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                sendJsonResponse(exchange, response.statusCode(), "{\"error\": \"YouTube API error\"}");
+                return;
+            }
+
+            JsonObject json = gson.fromJson(response.body(), JsonObject.class);
+            if (!json.has("items") || json.getAsJsonArray("items").size() == 0) {
+                sendJsonResponse(exchange, 404, "{\"error\": \"No live stream found\"}");
+                return;
+            }
+
+            String videoId = json.getAsJsonArray("items")
+                    .get(0).getAsJsonObject()
+                    .getAsJsonObject("id")
+                    .get("videoId").getAsString();
+
+            liveStreamCache.put(channelId, videoId);
+            liveStreamCacheTimestamps.put(channelId, now);
+
+            sendJsonResponse(exchange, 200, "{\"videoId\": \"" + escapeJson(videoId) + "\"}");
+        } catch (Exception e) {
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+        }
     }
 
     private void sendJsonResponse(HttpExchange exchange, int statusCode, String responseJson) throws IOException {

@@ -40,6 +40,7 @@ const STOCK_TABLE_HEAD = `<tr>
     <th></th></tr>`;
 
 const MF_TABLE_HEAD = `<tr>
+    <th class="mf-cb-cell"></th>
     <th>Code</th><th>Scheme</th>
     <th class="right-align">NAV (₹)</th>
     <th class="right-align">Change</th>
@@ -658,31 +659,6 @@ function fetchGeneralNews() {
             content.innerHTML = '<p style="color:var(--val-red); padding:1rem;">Sync Error.</p>';
         });
 
-    fetchCalendarData(); // Also refresh calendar
-}
-
-function fetchCalendarData() {
-    const content = document.getElementById('calendar-content');
-    fetch('/api/calendar')
-        .then(r => r.json())
-        .then(data => {
-            const earnings = data.earnings || [];
-            const ipos = data.ipos || [];
-            const combined = [
-                ...earnings.map(e => ({ ...e, type: 'EARNINGS' })),
-                ...ipos.map(i => ({ ...i, type: 'IPO', impact: 'MEDIUM' }))
-            ];
-
-            content.innerHTML = combined.map(item => `
-                <div class="calendar-item">
-                    <div>
-                        <div class="cal-company">${item.company}</div>
-                        <div class="cal-date">${item.date} • ${item.type}</div>
-                    </div>
-                    <div class="cal-impact impact-${(item.impact || 'MEDIUM').toLowerCase()}">${item.impact || item.status}</div>
-                </div>
-            `).join('');
-        });
 }
 
 function updateMarketStatus() {
@@ -803,6 +779,8 @@ async function loadAmcList() {
 }
 
 function renderMFTable(funds) {
+    selectedMFunds.clear();
+    updateCompareBar();
     tableBody.innerHTML = '';
     if (!funds || funds.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--text-secondary);">No funds found.</td></tr>`;
@@ -857,7 +835,20 @@ function createMFRow(mf) {
         <td></td>
     `;
 
-    tr.addEventListener('click', () => toggleMFDetails(mf, tr));
+    // Prepend checkbox cell
+    const cbTd = document.createElement('td');
+    cbTd.className = 'mf-cb-cell';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selectedMFunds.has(String(mf.schemeCode));
+    cb.addEventListener('change', () => handleMFCheckboxChange(mf, cb));
+    cbTd.appendChild(cb);
+    tr.insertBefore(cbTd, tr.firstChild);
+
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('.mf-cb-cell')) return;
+        toggleMFDetails(mf, tr);
+    });
     return tr;
 }
 
@@ -869,9 +860,25 @@ amcSelect.addEventListener('change', async (e) => {
     }
 });
 
+document.getElementById('mf-compare-btn').addEventListener('click', openCompareModal);
+document.getElementById('mf-compare-clear').addEventListener('click', () => {
+    selectedMFunds.clear();
+    document.querySelectorAll('.mf-cb-cell input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateCompareBar();
+});
+document.getElementById('mf-compare-close').addEventListener('click', closeCompareModal);
+
 // ── MF row expansion ─────────────────────────────────────────────────
 
-const MF_COL_COUNT = 12;
+const MF_COL_COUNT = 11;
+
+// Fund comparison state
+const selectedMFunds = new Map(); // schemeCode (string) → mf object
+const COMPARE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#a855f7', '#ef4444'];
+const COMPARE_MAX = 5;
+let compareFundsData = []; // holds { mf, chartData } for the open modal
+let compareRange = '1y';
+let handleCompareEsc = null;
 
 function toggleMFDetails(mf, tr) {
     const existing = tr.nextElementSibling;
@@ -1074,10 +1081,338 @@ document.addEventListener('mouseout', (e) => {
     newsTooltip.classList.remove('visible');
 });
 
+// =============================================================================
+// MF Fund Comparison
+// =============================================================================
+
+function handleMFCheckboxChange(mf, cb) {
+    const code = String(mf.schemeCode);
+    if (cb.checked) {
+        if (selectedMFunds.size >= COMPARE_MAX) {
+            cb.checked = false;
+            return;
+        }
+        selectedMFunds.set(code, mf);
+    } else {
+        selectedMFunds.delete(code);
+    }
+    updateCompareBar();
+}
+
+function updateCompareBar() {
+    const bar = document.getElementById('mf-compare-bar');
+    const countEl = document.getElementById('mf-compare-count');
+    const n = selectedMFunds.size;
+    if (n >= 2) {
+        bar.style.display = 'flex';
+        countEl.textContent = `${n} fund${n > 1 ? 's' : ''} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+async function openCompareModal() {
+    const modal = document.getElementById('mf-compare-modal');
+    const body = document.getElementById('mf-compare-dialog-body');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    body.innerHTML = `<div class="chart-loading" style="height:200px"><div class="spinner"></div></div>`;
+
+    const funds = Array.from(selectedMFunds.values());
+    compareRange = '1y';
+
+    // Fetch all chart histories (uses cache when available)
+    try {
+        await Promise.all(funds.map(mf => fetchMFChartData(mf.schemeCode, mf.schemeName)));
+    } catch (e) {
+        body.innerHTML = `<p style="color:var(--red);padding:2rem;">Failed to load chart data.</p>`;
+        return;
+    }
+
+    compareFundsData = funds.map(mf => ({
+        mf,
+        chartData: mfChartCache[`mf-${mf.schemeCode}`] || null
+    }));
+
+    renderCompareModalContent(body);
+
+    // Close on backdrop click
+    document.querySelector('.mf-compare-backdrop').onclick = closeCompareModal;
+
+    // Close on ESC
+    handleCompareEsc = (e) => { if (e.key === 'Escape') closeCompareModal(); };
+    document.addEventListener('keydown', handleCompareEsc);
+}
+
+function closeCompareModal() {
+    document.getElementById('mf-compare-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    const existing = Chart.getChart('mf-compare-canvas');
+    if (existing) existing.destroy();
+    if (handleCompareEsc) {
+        document.removeEventListener('keydown', handleCompareEsc);
+        handleCompareEsc = null;
+    }
+}
+
+async function fetchMFChartData(schemeCode, schemeName) {
+    const key = `mf-${schemeCode}`;
+    if (mfChartCache[key]) return mfChartCache[key];
+    const resp = await fetch(`/api/mf/chart?code=${schemeCode}`);
+    if (!resp.ok) throw new Error('Network error');
+    const data = await resp.json();
+    mfChartCache[key] = { ...data, schemeName };
+    return mfChartCache[key];
+}
+
+function renderCompareModalContent(body) {
+    const rangeButtons = ['3mo', '6mo', '1y'].map(r =>
+        `<button class="range-btn${r === compareRange ? ' active' : ''}" onclick="switchCompareRange('${r}')">${MF_RANGE_LABEL[r]}</button>`
+    ).join('');
+
+    body.innerHTML = `
+        <div class="mf-compare-range-row">
+            <div class="range-selector">${rangeButtons}</div>
+            <span class="mf-compare-range-note">Normalized to 100 at start of period</span>
+        </div>
+        <div class="mf-compare-chart-wrap">
+            <div id="mf-compare-chart-loading" class="chart-loading">
+                <div class="spinner" style="width:22px;height:22px;margin-right:10px;margin-bottom:0;"></div>
+                Building comparison...
+            </div>
+            <canvas id="mf-compare-canvas" style="display:none;"></canvas>
+        </div>
+        <div class="mf-compare-metrics-section">
+            ${buildCompareMetricsTable(compareFundsData)}
+        </div>
+    `;
+
+    renderCompareChart(compareFundsData, compareRange);
+}
+
+window.switchCompareRange = function (range) {
+    compareRange = range;
+    document.querySelectorAll('#mf-compare-dialog-body .range-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === MF_RANGE_LABEL[range]);
+    });
+    renderCompareChart(compareFundsData, range);
+};
+
+function renderCompareChart(fundsData, range) {
+    const loading = document.getElementById('mf-compare-chart-loading');
+    const canvas = document.getElementById('mf-compare-canvas');
+    if (!loading || !canvas) return;
+
+    const count = MF_RANGE_RECORDS[range] || 252;
+    const datasets = [];
+    let sharedLabels = null;
+
+    fundsData.forEach(({ mf, chartData }, i) => {
+        if (!chartData || !chartData.dates || chartData.dates.length === 0) return;
+
+        const slicedDates = chartData.dates.slice(0, count).reverse();
+        const slicedNavs  = chartData.navs.slice(0, count).reverse();
+
+        if (!sharedLabels) {
+            sharedLabels = slicedDates.map(d => {
+                const [day, month, year] = d.split('-');
+                return new Date(+year, +month - 1, +day)
+                    .toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
+            });
+        }
+
+        const base = slicedNavs[0] || 1;
+        const normalized = slicedNavs.map(v => parseFloat(((v / base) * 100).toFixed(2)));
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+        const shortName = mf.schemeName
+            .replace(/\s*-\s*(Direct Plan|Regular Plan|Growth Option|Growth|IDCW|Dividend)\s*/gi, ' ')
+            .replace(/\s+/g, ' ').trim();
+
+        datasets.push({
+            label: shortName,
+            data: normalized,
+            borderColor: color,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            fill: false,
+            tension: 0.1
+        });
+    });
+
+    if (datasets.length === 0) {
+        loading.innerHTML = '<span style="color:var(--val-red)">Chart data unavailable.</span>';
+        return;
+    }
+
+    loading.style.display = 'none';
+    canvas.style.display = 'block';
+
+    requestAnimationFrame(() => {
+        const existing = Chart.getChart('mf-compare-canvas');
+        if (existing) existing.destroy();
+
+        new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: sharedLabels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600, easing: 'easeOutQuart' },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            color: '#94a3b8',
+                            font: { size: 11, family: 'Inter' },
+                            boxWidth: 20,
+                            padding: 14
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        titleColor: '#94a3b8',
+                        bodyColor: '#f1f5f9',
+                        borderColor: 'rgba(255,255,255,0.1)',
+                        borderWidth: 1,
+                        padding: 10,
+                        callbacks: {
+                            label: ctx => {
+                                const val = ctx.parsed.y;
+                                const gain = val - 100;
+                                const sign = gain >= 0 ? '+' : '';
+                                return `${ctx.dataset.label}: ${val.toFixed(2)} (${sign}${gain.toFixed(2)}%)`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        grid: { display: false },
+                        ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                    },
+                    y: {
+                        display: true,
+                        beginAtZero: false,
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: {
+                            color: '#64748b',
+                            callback: v => v.toFixed(0)
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
+
+function buildCompareMetricsTable(fundsData) {
+    const funds = fundsData.map(d => d.mf);
+
+    const METRICS = [
+        { section: 'Current' },
+        { label: 'NAV (₹)',       field: 'latestNav',           lowerBetter: false, fmt: v => `₹${v.toFixed(4)}` },
+        { label: 'Day Change %',  field: 'percentChange',       lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { section: 'Returns' },
+        { label: '1 Week',        field: 'ret1w',               lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '1 Month',       field: 'ret1m',               lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '3 Months',      field: 'ret3m',               lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '6 Months',      field: 'ret6m',               lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '1Y CAGR',       field: 'cagr1y',              lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '3Y CAGR',       field: 'cagr3y',              lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { label: '5Y CAGR',       field: 'cagr5y',              lowerBetter: false, fmt: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%` },
+        { section: 'Risk' },
+        { label: 'Volatility',    field: 'volatility',          lowerBetter: true,  fmt: v => `${v.toFixed(2)}%` },
+        { label: 'Max Drawdown',  field: 'maxDrawdown',         lowerBetter: true,  fmt: v => `${v.toFixed(2)}%` },
+        { label: 'Downside Dev.', field: 'downsideDeviation',   lowerBetter: true,  fmt: v => `${v.toFixed(2)}%` },
+        { label: 'Sharpe',        field: 'sharpe',              lowerBetter: false, fmt: v => v.toFixed(2) },
+        { label: 'Sortino',       field: 'sortino',             lowerBetter: false, fmt: v => v.toFixed(2) },
+    ];
+
+    const colCount = funds.length + 1;
+
+    const headerCols = funds.map((mf, i) => {
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+        const short = mf.schemeName
+            .replace(/\s*-\s*(Direct Plan|Regular Plan|Growth Option|Growth|IDCW|Dividend)\s*/gi, ' ')
+            .replace(/\s+/g, ' ').trim();
+        return `<th class="fund-col" style="color:${color};" title="${escapeAttr(mf.schemeName)}">${short}</th>`;
+    }).join('');
+
+    const rows = METRICS.map(m => {
+        if (m.section) {
+            return `<tr class="mf-compare-section-row"><td colspan="${colCount}">${m.section}</td></tr>`;
+        }
+
+        const rawVals = funds.map(f => {
+            const v = f[m.field];
+            return (v != null && !isNaN(v)) ? v : null;
+        });
+        const nonNull = rawVals.filter(v => v !== null);
+        let bestVal = null;
+        if (nonNull.length >= 2) {
+            bestVal = m.lowerBetter ? Math.min(...nonNull) : Math.max(...nonNull);
+        }
+
+        const cells = funds.map((_, i) => {
+            const v = rawVals[i];
+            if (v === null) return `<td><span class="mf-na">—</span></td>`;
+            const isBest = bestVal !== null && v === bestVal;
+            const colorCls = (m.field !== 'latestNav' && m.field !== 'volatility' &&
+                              m.field !== 'maxDrawdown' && m.field !== 'downsideDeviation')
+                ? (v > 0 ? 'val-green' : v < 0 ? 'val-red' : '')
+                : '';
+            return `<td${isBest ? ' class="mf-compare-best"' : ''}><span class="${colorCls}">${m.fmt(v)}</span></td>`;
+        }).join('');
+
+        return `<tr><td>${m.label}</td>${cells}</tr>`;
+    }).join('');
+
+    return `
+        <table class="mf-compare-metrics-table mf-compare-metrics-head">
+            <thead><tr><th>Metric</th>${headerCols}</tr></thead>
+        </table>
+        <table class="mf-compare-metrics-table">
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+// =============================================================================
+// Live TV
+// =============================================================================
+
+const LIVE_CHANNELS = [
+    { name: 'Bloomberg', embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCIALMKvObZNtJ6AmdCLP7Lg&autoplay=1&mute=1&rel=0' },
+    { name: 'CNBC',      embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCvJJ_dzjViJCoLf5uKUTwoA&autoplay=1&mute=1&rel=0' },
+];
+
+function initLiveTV() {
+    const container = document.getElementById('live-tv-channel-pills');
+    container.innerHTML = LIVE_CHANNELS
+        .map((ch, i) => `<button class="live-tv-channel-pill" onclick="setLiveTVChannel(${i}, this)">${ch.name}</button>`)
+        .join('');
+    setLiveTVChannel(0, container.firstElementChild);
+}
+
+window.setLiveTVChannel = function (idx, btn) {
+    document.querySelectorAll('.live-tv-channel-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('live-tv-placeholder').style.display = 'none';
+    const iframe = document.getElementById('live-tv-iframe');
+    iframe.style.display = 'block';
+    iframe.src = LIVE_CHANNELS[idx].embedUrl;
+};
+
 // Boot
 updateMarketStatus();
 renderTabs();
 fetchQuotes();
+initLiveTV();
 setInterval(fetchQuotes, REFRESH_INTERVAL);
 setInterval(updateMarketStatus, 60000); // Update status every minute
 
