@@ -1,6 +1,7 @@
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 
 public class ApiHandler implements HttpHandler {
     private final StockAPIClient apiClient;
+    private final MFApiClient mfApiClient;
     private static final Gson gson = new Gson();
     
     // In-memory cache for quotes (Symbol -> StockQuote)
@@ -27,9 +29,17 @@ public class ApiHandler implements HttpHandler {
     private static final long CACHE_EXPIRY_MS = 60000; // 1 minute fresh, but keep stale indefinitely for UI stability
     private static final DateTimeFormatter RSS_DATE_FORMATTER = DateTimeFormatter.RFC_1123_DATE_TIME;
     private static final Set<String> TRUSTED_SOURCES = Set.of(
-        "mint", "the economic times", "business standard", "reuters", "bloomberg", 
-        "moneycontrol", "financial express", "cnbc", "yahoo finance", "business today", 
-        "ndtv profit", "finshot", "the hindu business line"
+        // Indian sources
+        "mint", "livemint", "the economic times", "et markets", "economictimes",
+        "business standard", "moneycontrol", "financial express", "business today",
+        "ndtv profit", "ndtvprofit", "finshot", "the hindu business line", "hindu business line",
+        "zeebiz", "cnbctv18", "the ken", "inc42", "entrackr", "vccircle",
+        // Global sources
+        "reuters", "bloomberg", "cnbc", "yahoo finance", "marketwatch",
+        "wall street journal", "wsj", "financial times", "ft.com",
+        "morningstar", "benzinga", "seeking alpha", "investopedia",
+        "barron", "fortune", "forbes", "business insider", "markets insider",
+        "associated press", "ap news", "the guardian", "bbc"
     );
 
     // Commodities Localization Constants
@@ -39,8 +49,40 @@ public class ApiHandler implements HttpHandler {
     private static final double GOLD_UNIT_G = 10.0; // 10 grams
     private static final double SILVER_UNIT_G = 1000.0; // 1 kg
 
-    public ApiHandler(StockAPIClient apiClient) {
+    // AMC names that match the start of scheme names in the mfapi.in dataset
+    private static final List<String> KNOWN_AMCS = Arrays.asList(
+        "Aditya Birla Sun Life", "Axis", "Bandhan", "Canara Robeco", "DSP",
+        "Edelweiss", "Franklin India", "HDFC", "HSBC", "ICICI Prudential",
+        "IDBI", "IDFC", "Invesco India", "ITI", "JM Financial", "Kotak",
+        "LIC MF", "Mahindra Manulife", "Mirae Asset", "Motilal Oswal",
+        "Navi", "Nippon India", "PGIM India", "Parag Parikh",
+        "Quantum", "SBI", "Sundaram", "Tata", "Taurus",
+        "Union", "UTI", "WhiteOak Capital", "Zerodha"
+    );
+
+    // Category keywords to match inside scheme names (case-insensitive)
+    private static final Map<String, String> MF_CATEGORY_KEYWORDS = Map.of(
+        "large-cap",  "large cap fund",
+        "mid-cap",    "mid cap fund",
+        "small-cap",  "small cap fund",
+        "flexi-cap",  "flexi cap fund"
+    );
+
+    // AMC priority order per category — approximates descending AUM rank
+    private static final Map<String, List<String>> MF_AMC_PRIORITY = Map.of(
+        "large-cap",  Arrays.asList("HDFC", "Nippon India", "ICICI Prudential", "SBI", "Kotak",
+                                    "Mirae Asset", "Axis", "UTI", "Canara Robeco", "Franklin India"),
+        "mid-cap",    Arrays.asList("HDFC", "Nippon India", "Kotak", "SBI", "Axis",
+                                    "Tata", "DSP", "Mirae Asset", "Franklin India"),
+        "small-cap",  Arrays.asList("Nippon India", "SBI", "HDFC", "Kotak", "Axis",
+                                    "Tata", "DSP", "Franklin India"),
+        "flexi-cap",  Arrays.asList("HDFC", "Parag Parikh", "Kotak", "Franklin India",
+                                    "UTI", "SBI", "Axis", "DSP")
+    );
+
+    public ApiHandler(StockAPIClient apiClient, MFApiClient mfApiClient) {
         this.apiClient = apiClient;
+        this.mfApiClient = mfApiClient;
     }
 
     private StockQuote localizeMetal(StockQuote q) {
@@ -95,8 +137,9 @@ public class ApiHandler implements HttpHandler {
             handleSearch(exchange);
         } else if ("/api/calendar".equals(path)) {
             handleCalendar(exchange);
+        } else if (path.startsWith("/api/mf")) {
+            handleMF(exchange, path);
         } else {
-            // No static handler needed since App handles it, but for safety:
             exchange.sendResponseHeaders(404, -1);
         }
     }
@@ -163,7 +206,7 @@ public class ApiHandler implements HttpHandler {
                     if (quoteCache.containsKey(trimmed)) {
                         quotesList.add(quoteCache.get(trimmed));
                     } else {
-                        quotesList.add(new StockQuote(trimmed, "Data Unavailable", 0.0, 0.0, 0.0, 0.0, 0.0, null));
+                        quotesList.add(new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0, null));
                     }
                 }
             });
@@ -241,7 +284,7 @@ public class ApiHandler implements HttpHandler {
             sendJsonResponse(exchange, 200, data);
         } catch (Exception e) {
             System.err.println("Chart API Error " + symbol + ": " + e.getMessage());
-            sendJsonResponse(exchange, 500, "{\"error\": \"" + e.getMessage() + "\"}");
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
         }
     }
 
@@ -254,7 +297,7 @@ public class ApiHandler implements HttpHandler {
         
         String searchTerm = "";
         for (String param : query.split("&")) {
-            String[] pair = param.split("=");
+            String[] pair = param.split("=", 2); // Limit to 2 parts so queries containing '=' are not broken
             if (pair.length == 2 && "q".equals(pair[0])) {
                 searchTerm = java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
             }
@@ -264,7 +307,7 @@ public class ApiHandler implements HttpHandler {
             String result = apiClient.searchSymbols(searchTerm);
             sendJsonResponse(exchange, 200, result);
         } catch (Exception e) {
-            sendJsonResponse(exchange, 500, "{\"error\": \"" + e.getMessage() + "\"}");
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
         }
     }
 
@@ -272,30 +315,37 @@ public class ApiHandler implements HttpHandler {
         String query = exchange.getRequestURI().getQuery();
         String symbol = null;
         String name = "Stock Market Breaking News";
-        
+
         if (query != null && query.contains("symbol=")) {
             symbol = query.split("symbol=")[1].split("&")[0];
             name = query.contains("name=") ? query.split("name=")[1].split("&")[0] : symbol;
         }
 
         String decodedName = java.net.URLDecoder.decode(name, StandardCharsets.UTF_8);
-        String encodedName = java.net.URLEncoder.encode(decodedName + (symbol != null ? " stock news" : ""), StandardCharsets.UTF_8);
-        
-        // Source 1: Yahoo Finance RSS (only if symbol exists)
+        String searchTerm = decodedName + (symbol != null ? " stock news" : "");
+        String encodedTerm = java.net.URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
+
+        // Source 1: Yahoo Finance RSS (symbol-specific, may not exist for all tickers)
         String yahooUrl = symbol != null ? "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + symbol : null;
-        // Source 2: Google News Aggregate RSS (Search based)
-        String googleUrl = "https://news.google.com/rss/search?q=" + encodedName + "&hl=en-IN&gl=IN&ceid=IN:en";
-        
+        // Source 2: Google News RSS
+        String googleUrl = "https://news.google.com/rss/search?q=" + encodedTerm + "&hl=en-IN&gl=IN&ceid=IN:en";
+        // Source 3: Bing News RSS — broad coverage, good for Indian tickers not in Yahoo RSS
+        String bingUrl = "https://www.bing.com/news/search?q=" + encodedTerm + "&format=rss";
+
         HttpRequest googleReq = HttpRequest.newBuilder().uri(URI.create(googleUrl)).header("User-Agent", "Mozilla/5.0").build();
+        HttpRequest bingReq   = HttpRequest.newBuilder().uri(URI.create(bingUrl)).header("User-Agent", "Mozilla/5.0").build();
         CompletableFuture<HttpResponse<String>> googleFuture = apiClient.sendAsyncRequest(googleReq);
-        
+        CompletableFuture<HttpResponse<String>> bingFuture   = apiClient.sendAsyncRequest(bingReq);
+
         CompletableFuture<HttpResponse<String>> yahooFuture = null;
         if (yahooUrl != null) {
             HttpRequest yahooReq = HttpRequest.newBuilder().uri(URI.create(yahooUrl)).header("User-Agent", "Mozilla/5.0").build();
             yahooFuture = apiClient.sendAsyncRequest(yahooReq);
         }
 
-        CompletableFuture<Void> allFutures = yahooFuture != null ? CompletableFuture.allOf(yahooFuture, googleFuture) : CompletableFuture.allOf(googleFuture);
+        CompletableFuture<Void> allFutures = yahooFuture != null
+            ? CompletableFuture.allOf(yahooFuture, googleFuture, bingFuture)
+            : CompletableFuture.allOf(googleFuture, bingFuture);
 
         final CompletableFuture<HttpResponse<String>> finalYahooFuture = yahooFuture;
         allFutures.thenAccept(v -> {
@@ -305,40 +355,58 @@ public class ApiHandler implements HttpHandler {
                     allItems.addAll(parseRssItems(finalYahooFuture.join().body(), "Yahoo Finance", 10));
                 }
                 allItems.addAll(parseRssItems(googleFuture.join().body(), "Google News", 15));
+                allItems.addAll(parseRssItems(bingFuture.join().body(), "Bing News", 10));
 
-                // Filter by Trusted Sources, Deduplicate by Title, and Sort by Date
-                List<NewsItem> curatedItems = allItems.stream()
-                    .filter(item -> isTrusted(item.title, item.publisher))
+                // Deduplicate all items across sources by normalised title
+                Map<String, NewsItem> dedupedMap = allItems.stream()
                     .collect(Collectors.toMap(
-                        item -> item.title.toLowerCase().replaceAll("[^a-z0-9]", ""), // dedupe key
+                        item -> item.title.toLowerCase().replaceAll("[^a-z0-9]", ""),
                         item -> item,
                         (existing, replacement) -> existing.timestamp >= replacement.timestamp ? existing : replacement
-                    ))
-                    .values().stream()
+                    ));
+
+                // Filter by trusted sources first
+                List<NewsItem> curatedItems = dedupedMap.values().stream()
+                    .filter(item -> isTrusted(item.title, item.publisher))
                     .sorted(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed())
                     .limit(12)
                     .collect(Collectors.toList());
 
+                // Fallback: if fewer than 3 trusted articles found (common for niche tickers),
+                // fill up with the best remaining deduplicated items so the panel is never empty
+                if (curatedItems.size() < 3) {
+                    Set<String> usedKeys = curatedItems.stream()
+                        .map(i -> i.title.toLowerCase().replaceAll("[^a-z0-9]", ""))
+                        .collect(Collectors.toSet());
+                    List<NewsItem> extras = dedupedMap.values().stream()
+                        .filter(item -> !usedKeys.contains(item.title.toLowerCase().replaceAll("[^a-z0-9]", "")))
+                        .sorted(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed())
+                        .limit(12 - curatedItems.size())
+                        .collect(Collectors.toList());
+                    curatedItems.addAll(extras);
+                    curatedItems.sort(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed());
+                }
+
                 String lexiconJson = analyzeLexicon(curatedItems);
                 String semanticJson = analyzeSemantic(curatedItems, decodedName);
-                
+
                 String newsArrayJson = curatedItems.stream()
-                    .map(item -> String.format("{\"title\":\"%s\", \"link\":\"%s\", \"publisher\":\"%s\", \"date\":\"%s\"}", 
-                        escapeJson(item.title), escapeJson(item.link), escapeJson(item.publisher), escapeJson(item.date)))
+                    .map(item -> String.format("{\"title\":\"%s\", \"link\":\"%s\", \"publisher\":\"%s\", \"date\":\"%s\", \"description\":\"%s\"}",
+                        escapeJson(item.title), escapeJson(item.link), escapeJson(item.publisher), escapeJson(item.date), escapeJson(item.description)))
                     .collect(Collectors.joining(","));
 
                 sendJsonResponse(exchange, 200, String.format("{\"news\": [%s], \"lexicon\": %s, \"semantic\": %s}", newsArrayJson, lexiconJson, semanticJson));
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        });
+        }).join();
     }
 
     private static class NewsItem {
-        String title, link, publisher, date;
+        String title, link, publisher, date, description;
         long timestamp;
-        NewsItem(String t, String l, String p, String d, long ts) { 
-            title = t; link = l; publisher = p; date = d; timestamp = ts; 
+        NewsItem(String t, String l, String p, String d, String desc, long ts) {
+            title = t; link = l; publisher = p; date = d; description = desc; timestamp = ts;
         }
     }
 
@@ -393,8 +461,15 @@ public class ApiHandler implements HttpHandler {
                 // Simplified parsing of Gemini response
                 String text = response.body();
                 // Find "text": "..." in JSON
-                int start = text.indexOf("\"text\": \"") + 9;
+                int textIdx = text.indexOf("\"text\": \"");
+                if (textIdx < 0) {
+                    return "{\"recommendation\": \"ERROR\", \"summary\": \"AI response format unrecognized.\", \"isLocked\": false}";
+                }
+                int start = textIdx + 9;
                 int end = text.indexOf("\"", start);
+                if (end < 0) {
+                    return "{\"recommendation\": \"ERROR\", \"summary\": \"AI response format unrecognized.\", \"isLocked\": false}";
+                }
                 String aiResponse = text.substring(start, end).replace("\\n", " ");
                 
                 String recommendation = "HOLD";
@@ -414,32 +489,56 @@ public class ApiHandler implements HttpHandler {
         return TRUSTED_SOURCES.stream().anyMatch(combined::contains);
     }
 
-    private List<NewsItem> parseRssItems(String xml, String publisher, int limit) {
+    private List<NewsItem> parseRssItems(String xml, String feedName, int limit) {
         List<NewsItem> items = new ArrayList<>();
         Pattern itemPattern = Pattern.compile("<item>(.*?)</item>", Pattern.DOTALL);
         Pattern titlePattern = Pattern.compile("<title>(.*?)</title>", Pattern.DOTALL);
-        Pattern linkPattern = Pattern.compile("<link>(.*?)</link>", Pattern.DOTALL);
-        Pattern datePattern = Pattern.compile("<pubDate>(.*?)</pubDate>", Pattern.DOTALL);
+        Pattern linkPattern  = Pattern.compile("<link>(.*?)</link>", Pattern.DOTALL);
+        Pattern datePattern  = Pattern.compile("<pubDate>(.*?)</pubDate>", Pattern.DOTALL);
+        Pattern descPattern  = Pattern.compile("<description>(.*?)</description>", Pattern.DOTALL);
+        // Google News and Bing News emit <source url="...">Publisher Name</source> per item
+        Pattern sourcePattern = Pattern.compile("<source[^>]*>(.*?)</source>", Pattern.DOTALL);
 
         Matcher itemMatcher = itemPattern.matcher(xml);
         int count = 0;
         while (itemMatcher.find() && count < limit) {
             String itemXml = itemMatcher.group(1);
             String title = extractTag(itemXml, titlePattern);
-            String link = extractTag(itemXml, linkPattern);
-            String date = extractTag(itemXml, datePattern);
-            
+            String link  = extractTag(itemXml, linkPattern);
+            String date  = extractTag(itemXml, datePattern);
+
+            // Extract description, strip HTML tags, and trim to a readable length
+            String rawDesc = extractTag(itemXml, descPattern);
+            String description = rawDesc.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim();
+            if (description.length() > 280) {
+                description = description.substring(0, 277) + "...";
+            }
+
+            // Resolve real publisher so isTrusted() can match against actual outlet names:
+            // 1. Prefer <source> tag (Google News, Bing News include this per item)
+            // 2. Fall back to "Title - Publisher" tail pattern (common in both feeds)
+            // 3. Use the feed name as last resort
+            String publisher = extractTag(itemXml, sourcePattern);
+            if (publisher.isEmpty()) {
+                int dashIdx = title.lastIndexOf(" - ");
+                if (dashIdx > 20) { // guard: title part must be meaningful length
+                    publisher = title.substring(dashIdx + 3).trim();
+                    title     = title.substring(0, dashIdx).trim();
+                } else {
+                    publisher = feedName;
+                }
+            }
+
             long ts = 0;
             try {
                 if (!date.isEmpty()) {
                     ts = ZonedDateTime.parse(date, RSS_DATE_FORMATTER).toInstant().toEpochMilli();
                 }
             } catch (Exception e) {
-                // If parse fails, use current time but prioritize sorted items
                 ts = System.currentTimeMillis() - (count * 1000);
             }
 
-            items.add(new NewsItem(title, link, publisher, date, ts));
+            items.add(new NewsItem(title, link, publisher, date, description, ts));
             count++;
         }
         return items;
@@ -462,6 +561,181 @@ public class ApiHandler implements HttpHandler {
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
                     .replace("\t", "\\t");
+    }
+
+    // -------------------------------------------------------------------------
+    // Mutual Fund handlers
+    // -------------------------------------------------------------------------
+
+    private void handleMF(HttpExchange exchange, String path) throws IOException {
+        String sub = path.substring("/api/mf".length()).replaceAll("/$", "");
+        String query = exchange.getRequestURI().getQuery();
+        if ("/category".equals(sub))  { handleMFCategory(exchange, query); }
+        else if ("/houses".equals(sub))    { handleMFHouses(exchange); }
+        else if ("/house".equals(sub))     { handleMFHouse(exchange, query); }
+        else if ("/chart".equals(sub))     { handleMFChart(exchange, query); }
+        else { exchange.sendResponseHeaders(404, -1); }
+    }
+
+    /**
+     * Returns top-5 Direct-Growth schemes for a category, sorted by AMC priority.
+     * Searches per AMC in parallel using /mf/search (reliable), then fetches /latest NAV.
+     */
+    private void handleMFCategory(HttpExchange exchange, String queryStr) throws IOException {
+        String cat = "";
+        if (queryStr != null) {
+            for (String p : queryStr.split("&")) {
+                String[] kv = p.split("=", 2);
+                if (kv.length == 2 && "cat".equals(kv[0])) cat = kv[1].toLowerCase();
+            }
+        }
+        String keyword = MF_CATEGORY_KEYWORDS.get(cat);
+        if (keyword == null) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Unknown category: " + escapeJson(cat) + "\"}");
+            return;
+        }
+        List<String> priority = MF_AMC_PRIORITY.getOrDefault(cat, Collections.emptyList());
+        try {
+            // Search per AMC in parallel: "<AMC> <category keyword>" → pick first Direct Growth result
+            final String kw = keyword;
+            List<CompletableFuture<Optional<Integer>>> searchFutures = priority.stream()
+                .map(amc -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        List<JsonObject> hits = mfApiClient.searchSchemes(amc + " " + kw);
+                        return hits.stream()
+                            .filter(s -> {
+                                String n = s.get("schemeName").getAsString().toLowerCase();
+                                return n.contains("direct") && n.contains("growth");
+                            })
+                            .findFirst()
+                            .map(s -> s.get("schemeCode").getAsInt());
+                    } catch (Exception e) {
+                        System.err.println("MF search error for " + amc + ": " + e.getMessage());
+                        return Optional.<Integer>empty();
+                    }
+                }))
+                .collect(Collectors.toList());
+
+            CompletableFuture.allOf(searchFutures.toArray(new CompletableFuture[0])).join();
+
+            // Collect codes in AMC priority order, up to 5
+            List<Integer> codes = new ArrayList<>();
+            for (CompletableFuture<Optional<Integer>> f : searchFutures) {
+                if (codes.size() >= 5) break;
+                f.join().ifPresent(codes::add);
+            }
+
+            if (codes.isEmpty()) {
+                sendJsonResponse(exchange, 200, "[]");
+                return;
+            }
+            List<MutualFundData> results = fetchSchemeDataConcurrently(codes);
+            Map<Integer, MutualFundData> byCode = new java.util.HashMap<>();
+            results.forEach(mf -> byCode.put(mf.getSchemeCode(), mf));
+            List<MutualFundData> ordered = codes.stream()
+                .filter(byCode::containsKey).map(byCode::get).collect(Collectors.toList());
+
+            sendJsonResponse(exchange, 200, gson.toJson(ordered));
+        } catch (Exception e) {
+            System.err.println("MF category error: " + e.getMessage());
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /** Returns the hardcoded list of known AMC names (no API call needed). */
+    private void handleMFHouses(HttpExchange exchange) throws IOException {
+        sendJsonResponse(exchange, 200, gson.toJson(KNOWN_AMCS));
+    }
+
+    /** Returns up to 15 Direct-Growth schemes for a given AMC with latest NAVs. */
+    private void handleMFHouse(HttpExchange exchange, String queryStr) throws IOException {
+        String amc = "";
+        if (queryStr != null) {
+            for (String p : queryStr.split("&")) {
+                String[] kv = p.split("=", 2);
+                if (kv.length == 2 && "amc".equals(kv[0])) {
+                    amc = java.net.URLDecoder.decode(kv[1], java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        }
+        if (amc.isEmpty()) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing amc parameter\"}");
+            return;
+        }
+        try {
+            // Append "direct growth" so the search API returns only relevant Direct Plan schemes
+            List<JsonObject> hits = mfApiClient.searchSchemes(amc + " direct growth");
+            List<Integer> codes = hits.stream()
+                .filter(s -> {
+                    String n = s.get("schemeName").getAsString().toLowerCase();
+                    return n.contains("direct") && n.contains("growth");
+                })
+                .limit(15)
+                .map(s -> s.get("schemeCode").getAsInt())
+                .collect(Collectors.toList());
+
+            if (codes.isEmpty()) {
+                sendJsonResponse(exchange, 200, "[]");
+                return;
+            }
+            List<MutualFundData> results = fetchSchemeDataConcurrently(codes);
+            results.sort(Comparator.comparing(MutualFundData::getSchemeName));
+            sendJsonResponse(exchange, 200, gson.toJson(results));
+        } catch (Exception e) {
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Returns raw NAV history for a scheme as {dates: [...], navs: [...]}, newest-first.
+     * Reuses the same cached history that getSchemeData() already populated.
+     */
+    private void handleMFChart(HttpExchange exchange, String queryStr) throws IOException {
+        int code = 0;
+        if (queryStr != null) {
+            for (String p : queryStr.split("&")) {
+                String[] kv = p.split("=", 2);
+                if (kv.length == 2 && "code".equals(kv[0])) {
+                    try { code = Integer.parseInt(kv[1]); } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        if (code == 0) {
+            sendJsonResponse(exchange, 400, "{\"error\": \"Missing or invalid code parameter\"}");
+            return;
+        }
+        try {
+            MFApiClient.NavHistory hist = mfApiClient.getNavHistory(code);
+            StringBuilder sb = new StringBuilder("{\"dates\":[");
+            for (int i = 0; i < hist.dates.length; i++) {
+                if (i > 0) sb.append(',');
+                sb.append('"').append(hist.dates[i]).append('"');
+            }
+            sb.append("],\"navs\":[");
+            for (int i = 0; i < hist.navs.length; i++) {
+                if (i > 0) sb.append(',');
+                sb.append(hist.navs[i]);
+            }
+            sb.append("]}");
+            sendJsonResponse(exchange, 200, sb.toString());
+        } catch (Exception e) {
+            sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    private List<MutualFundData> fetchSchemeDataConcurrently(List<Integer> codes) {
+        List<MutualFundData> results = Collections.synchronizedList(new ArrayList<>());
+        List<CompletableFuture<Void>> futures = codes.stream()
+            .map(code -> CompletableFuture.runAsync(() -> {
+                try {
+                    results.add(mfApiClient.getSchemeData(code));
+                } catch (Exception e) {
+                    System.err.println("MF data error for " + code + ": " + e.getMessage());
+                }
+            }))
+            .collect(Collectors.toList());
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        return results;
     }
 
     private void sendJsonResponse(HttpExchange exchange, int statusCode, String responseJson) throws IOException {

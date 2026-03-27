@@ -789,3 +789,181 @@ canvas {
     color: #f59e0b;
     border: 1px solid rgba(245, 158, 11, 0.3);
 }
+
+/* Mutual Funds tab */
+.mf-controls-bar {
+    display: none;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.65rem 1.5rem;
+    background: rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.mf-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+}
+
+.glass-select {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    padding: 0.45rem 0.9rem;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    outline: none;
+    cursor: pointer;
+    min-width: 240px;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.2s;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.25rem;
+}
+
+.glass-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.glass-select option {
+    background: #1e293b;
+    color: var(--text-primary);
+}
+
+.mf-scheme-name {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: default;
+}
+
+.mf-fund-house {
+    font-size: 0.8rem;
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* News hover tooltip */
+.news-tooltip {
+    position: fixed;
+    z-index: 1000;
+    max-width: 320px;
+    background: #1a2236;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    border-radius: 12px;
+    padding: 0.875rem 1rem;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.news-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.news-tooltip-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #f1f5f9;
+    line-height: 1.45;
+}
+/* ── MF Detail Panel (expanded row) ─────────────────────────────────── */
+.mf-detail-panel {
+    display: flex;
+    gap: 1.5rem;
+    padding: 1.25rem 1.5rem 1.5rem;
+    background: rgba(255, 255, 255, 0.015);
+    border-top: 1px solid var(--glass-border);
+}
+
+.mf-metrics-section {
+    flex: 0 0 210px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-left: 1px solid var(--glass-border);
+    padding-left: 1.5rem;
+}
+
+.mf-metrics-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 1rem 0;
+}
+
+.mf-metrics-block + .mf-metrics-block {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.mf-metrics-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-secondary);
+    margin-bottom: 0.6rem;
+}
+
+.mf-metrics-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.mf-metric-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    padding: 0.3rem 0.75rem 0.3rem 0;
+    white-space: nowrap;
+}
+
+.mf-metric-value {
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-align: right;
+    padding: 0.3rem 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.mf-metrics-table tr {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.mf-metrics-table tr:last-child {
+    border-bottom: none;
+}
+
+.mf-na {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.mf-chart-section {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.mf-chart-section canvas {
+    width: 100% !important;
+    flex: 1 1 0;
+}

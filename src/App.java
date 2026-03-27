@@ -10,13 +10,13 @@ public class App {
         // Serve frontend files
         server.createContext("/", new StaticFileHandler());
         
-        // API Endpoint for stock data
+        // API Endpoints
         StockAPIClient apiClient = new StockAPIClient();
-        server.createContext("/api/", new ApiHandler(apiClient));
+        MFApiClient mfApiClient = new MFApiClient();
+        server.createContext("/api/", new ApiHandler(apiClient, mfApiClient));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
-
         System.out.println("Web Server started on http://localhost:" + port);
     }
 }

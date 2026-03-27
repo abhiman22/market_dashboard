@@ -21,8 +21,31 @@ const defaultState = {
     },
     "Cryptocurrencies": {
         "Crypto": ["BTC-USD", "ETH-USD", "XRP-USD"]
+    },
+    "Mutual Funds": {
+        "Large Cap": [],
+        "Mid Cap": [],
+        "Small Cap": [],
+        "Flexi Cap": [],
+        "Fund House": []
     }
 };
+
+// Table header HTML for stock tabs vs MF tab
+const STOCK_TABLE_HEAD = `<tr>
+    <th>Symbol</th><th>Company</th>
+    <th class="right-align">Price</th><th class="right-align">Change</th>
+    <th class="right-align">% Change</th><th class="right-align">52W High</th>
+    <th class="right-align">52W Low</th><th class="right-align">Δ 52W High</th>
+    <th></th></tr>`;
+
+const MF_TABLE_HEAD = `<tr>
+    <th>Code</th><th>Scheme</th>
+    <th class="right-align">NAV (₹)</th>
+    <th class="right-align">Change</th><th class="right-align">% Change</th>
+    <th class="right-align">1Y CAGR</th><th class="right-align">3Y CAGR</th>
+    <th class="right-align">52W High</th><th class="right-align">52W Low</th><th class="right-align">Δ 52W High</th>
+    <th class="right-align">NAV Date</th><th></th></tr>`;
 
 // Deep merge local storage with default state to ensure we always have the defaults
 let savedState = JSON.parse(localStorage.getItem('vanguardState')) || {};
@@ -58,6 +81,9 @@ let activeSubTab = Object.keys(appState[activeMainTab])[0];
 const mainTabsContainer = document.getElementById('main-tabs-container');
 const subTabsContainer = document.getElementById('sub-tabs-container');
 const tableBody = document.getElementById('table-body');
+const tableHead = document.getElementById('table-head');
+const mfControls = document.getElementById('mf-controls');
+const amcSelect = document.getElementById('amc-select');
 const loadingOverlay = document.getElementById('loading-overlay');
 const refreshBtn = document.getElementById('refresh-btn');
 const searchInput = document.getElementById('symbol-search');
@@ -146,6 +172,15 @@ function getColorClass(val) {
 }
 
 async function fetchQuotes() {
+    if (activeMainTab === 'Mutual Funds') {
+        await fetchMFData();
+        return;
+    }
+
+    // Restore stock table headers when switching away from MF tab
+    tableHead.innerHTML = STOCK_TABLE_HEAD;
+    mfControls.style.display = 'none';
+
     let symbols = appState[activeMainTab]?.[activeSubTab] || [];
 
     // Manage Overview extras visibility
@@ -204,6 +239,10 @@ async function fetchQuotes() {
     }
 }
 
+function escapeAttr(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderGeneralNews(news) {
     const content = document.getElementById('breaking-news-content');
     if (news.length === 0) {
@@ -212,7 +251,9 @@ function renderGeneralNews(news) {
     }
 
     content.innerHTML = news.map(item => `
-        <a href="${item.link}" target="_blank" class="news-sidebar-item">
+        <a href="${item.link}" target="_blank" class="news-sidebar-item"
+           data-full-title="${escapeAttr(item.title)}"
+>
             <div class="news-sidebar-headline">${item.title}</div>
             <div class="news-sidebar-meta">
                 <span class="publisher">${item.publisher}</span>
@@ -417,7 +458,9 @@ function renderNews(newsData, canvasId) {
         let newsHtml = sentimentHtml + '<div class="news-title">Related News</div>';
         newsData.news.forEach(item => {
             newsHtml += `
-                <a href="${item.link}" target="_blank" class="news-item">
+                <a href="${item.link}" target="_blank" class="news-item"
+                   data-full-title="${escapeAttr(item.title)}"
+        >
                     <div class="news-headline">${item.title}</div>
                     <div class="news-meta">
                         <span>${item.publisher}</span>
@@ -687,6 +730,352 @@ window.toggleSection = function (sectionId) {
         chevron.classList.remove('collapsed');
     }
 }
+
+// =============================================================================
+// Mutual Funds
+// =============================================================================
+
+let amcListLoaded = false;
+
+async function fetchMFData() {
+    tableHead.innerHTML = MF_TABLE_HEAD;
+    document.getElementById('overview-extras').classList.remove('active');
+
+    if (activeSubTab === 'Fund House') {
+        mfControls.style.display = 'flex';
+        if (!amcListLoaded) await loadAmcList();
+        const selected = amcSelect.value;
+        if (selected) {
+            await fetchMFHouseData(selected);
+        } else {
+            tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--text-secondary);">Select a fund house from the dropdown above.</td></tr>`;
+        }
+        loadingOverlay.classList.remove('active');
+        return;
+    }
+
+    mfControls.style.display = 'none';
+    loadingOverlay.classList.add('active');
+    try {
+        const cat = activeSubTab.toLowerCase().replace(' ', '-');
+        const resp = await fetch(`/api/mf/category?cat=${cat}`);
+        if (!resp.ok) throw new Error('Network error');
+        const funds = await resp.json();
+        renderMFTable(funds);
+    } catch (e) {
+        console.error('MF fetch error:', e);
+        tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--val-red);">Failed to load fund data. Check server connection.</td></tr>`;
+    } finally {
+        loadingOverlay.classList.remove('active');
+    }
+}
+
+async function fetchMFHouseData(amc) {
+    loadingOverlay.classList.add('active');
+    try {
+        const resp = await fetch(`/api/mf/house?amc=${encodeURIComponent(amc)}`);
+        if (!resp.ok) throw new Error('Network error');
+        const funds = await resp.json();
+        renderMFTable(funds);
+    } catch (e) {
+        console.error('MF house fetch error:', e);
+        tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--val-red);">Failed to load fund data.</td></tr>`;
+    } finally {
+        loadingOverlay.classList.remove('active');
+    }
+}
+
+async function loadAmcList() {
+    try {
+        const resp = await fetch('/api/mf/houses');
+        if (!resp.ok) return;
+        const houses = await resp.json();
+        amcSelect.innerHTML = '<option value="">Select a fund house...</option>';
+        houses.forEach(h => {
+            const opt = document.createElement('option');
+            opt.value = h;
+            opt.textContent = h;
+            amcSelect.appendChild(opt);
+        });
+        amcListLoaded = true;
+    } catch (e) {
+        console.error('Failed to load AMC list:', e);
+    }
+}
+
+function renderMFTable(funds) {
+    tableBody.innerHTML = '';
+    if (!funds || funds.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--text-secondary);">No funds found.</td></tr>`;
+        return;
+    }
+    funds.forEach(mf => tableBody.appendChild(createMFRow(mf)));
+}
+
+function fmtCagr(v) {
+    if (!v) return '<span style="color:var(--text-secondary)">—</span>';
+    const cls = v > 0 ? 'val-green' : 'val-red';
+    return `<span class="${cls}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+}
+
+function createMFRow(mf) {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    const changeClass = getColorClass(mf.change);
+    const sign = mf.change > 0 ? '+' : '';
+
+    const navFmt = new Intl.NumberFormat('en-IN', {
+        minimumFractionDigits: 4, maximumFractionDigits: 4
+    }).format(mf.latestNav);
+
+    const changeFmt = mf.change !== 0
+        ? `${sign}${new Intl.NumberFormat('en-IN', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(mf.change)}`
+        : '—';
+    const pctFmt = mf.percentChange !== 0 ? `${sign}${mf.percentChange.toFixed(2)}%` : '—';
+
+    const navFmtShort = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const high52Fmt = mf.high52w ? `₹${navFmtShort.format(mf.high52w)}` : '—';
+    const low52Fmt  = mf.low52w  ? `₹${navFmtShort.format(mf.low52w)}`  : '—';
+    const deltaHighVal = mf.deltaHigh != null ? mf.deltaHigh : 0;
+    const deltaHighFmt = mf.high52w ? `${deltaHighVal.toFixed(2)}%` : '—';
+    const deltaHighClass = deltaHighVal >= 0 ? 'val-green' : 'val-red';
+
+    // Strip plan/option suffix for cleaner display
+    const displayName = mf.schemeName
+        .replace(/\s*-\s*(Direct Plan|Regular Plan|Growth Option|Growth|IDCW|Dividend)\s*/gi, ' ')
+        .replace(/\s+/g, ' ').trim();
+
+    tr.innerHTML = `
+        <td class="symbol-col" style="font-size:0.8rem; color:var(--text-secondary);">${mf.schemeCode}</td>
+        <td class="mf-scheme-name" title="${escapeAttr(mf.schemeName)}">${displayName}</td>
+        <td class="right-align price-col">₹${navFmt}</td>
+        <td class="right-align price-col ${changeClass}">${changeFmt}</td>
+        <td class="right-align price-col ${changeClass}">${pctFmt}</td>
+        <td class="right-align price-col">${fmtCagr(mf.cagr1y)}</td>
+        <td class="right-align price-col">${fmtCagr(mf.cagr3y)}</td>
+        <td class="right-align price-col">${high52Fmt}</td>
+        <td class="right-align price-col">${low52Fmt}</td>
+        <td class="right-align price-col ${deltaHighClass}">${deltaHighFmt}</td>
+        <td class="right-align name-col" style="font-size:0.85rem;">${mf.navDate}</td>
+        <td></td>
+    `;
+
+    tr.addEventListener('click', () => toggleMFDetails(mf, tr));
+    return tr;
+}
+
+amcSelect.addEventListener('change', async (e) => {
+    if (e.target.value) {
+        await fetchMFHouseData(e.target.value);
+    } else {
+        tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--text-secondary);">Select a fund house from the dropdown above.</td></tr>`;
+    }
+});
+
+// ── MF row expansion ─────────────────────────────────────────────────
+
+const MF_COL_COUNT = 12;
+
+function toggleMFDetails(mf, tr) {
+    const existing = tr.nextElementSibling;
+    if (existing && existing.classList.contains('chart-row')) {
+        existing.remove();
+        return;
+    }
+    document.querySelectorAll('.chart-row').forEach(r => r.remove());
+
+    const canvasId = `mf-chart-${mf.schemeCode}`;
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'chart-row';
+    detailRow.innerHTML = `
+        <td colspan="${MF_COL_COUNT}">
+            <div class="mf-detail-panel">
+                <div class="mf-chart-section">
+                    <div class="range-selector">
+                        <button class="range-btn" onclick="updateMFChart(${mf.schemeCode},'1d','${canvasId}')">1D</button>
+                        <button class="range-btn" onclick="updateMFChart(${mf.schemeCode},'5d','${canvasId}')">5D</button>
+                        <button class="range-btn" onclick="updateMFChart(${mf.schemeCode},'3mo','${canvasId}')">3M</button>
+                        <button class="range-btn" onclick="updateMFChart(${mf.schemeCode},'6mo','${canvasId}')">6M</button>
+                        <button class="range-btn active" onclick="updateMFChart(${mf.schemeCode},'1y','${canvasId}')">1Y</button>
+                    </div>
+                    <div id="loading-${canvasId}" class="chart-loading">
+                        <div class="spinner" style="width:22px;height:22px;margin-right:10px;margin-bottom:0;"></div>
+                        Loading NAV History...
+                    </div>
+                    <canvas id="${canvasId}" style="display:none; height:260px;"></canvas>
+                </div>
+                <div class="mf-metrics-section">
+                    ${renderMFReturnsTable(mf)}
+                    ${renderMFRiskTable(mf)}
+                </div>
+            </div>
+        </td>
+    `;
+    tr.after(detailRow);
+    fetchMFChart(mf.schemeCode, canvasId, mf.schemeName);
+}
+
+function renderMFReturnsTable(mf) {
+    const f = (v) => v
+        ? `<span class="${v > 0 ? 'val-green' : 'val-red'}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`
+        : '<span class="mf-na">—</span>';
+    const rows = [
+        ['1 Week',          f(mf.ret1w)],
+        ['1 Month',         f(mf.ret1m)],
+        ['3 Months',        f(mf.ret3m)],
+        ['6 Months',        f(mf.ret6m)],
+        ['1Y CAGR',         f(mf.cagr1y)],
+        ['3Y CAGR',         f(mf.cagr3y)],
+        ['5Y CAGR',         f(mf.cagr5y)],
+        ['Since Inception', f(mf.cagrSinceInception)],
+    ];
+    return `
+        <div class="mf-metrics-block">
+            <div class="mf-metrics-title">Returns</div>
+            <table class="mf-metrics-table">
+                ${rows.map(([label, val]) =>
+                    `<tr><td class="mf-metric-label">${label}</td><td class="mf-metric-value">${val}</td></tr>`
+                ).join('')}
+            </table>
+        </div>`;
+}
+
+function renderMFRiskTable(mf) {
+    const fp = (v) => v ? `${v.toFixed(2)}%` : '<span class="mf-na">—</span>';
+    const fr = (v) => v
+        ? `<span class="${v >= 1 ? 'val-green' : v > 0 ? '' : 'val-red'}">${v.toFixed(2)}</span>`
+        : '<span class="mf-na">—</span>';
+    const dd = mf.maxDrawdown
+        ? `<span class="val-red">${mf.maxDrawdown.toFixed(2)}%</span>`
+        : '<span class="mf-na">—</span>';
+    const rows = [
+        ['Volatility',     fp(mf.volatility)],
+        ['Max Drawdown',   dd],
+        ['Downside Dev.',  fp(mf.downsideDeviation)],
+        ['Sharpe',         fr(mf.sharpe)],
+        ['Sortino',        fr(mf.sortino)],
+    ];
+    return `
+        <div class="mf-metrics-block">
+            <div class="mf-metrics-title">Risk</div>
+            <table class="mf-metrics-table">
+                ${rows.map(([label, val]) =>
+                    `<tr><td class="mf-metric-label">${label}</td><td class="mf-metric-value">${val}</td></tr>`
+                ).join('')}
+            </table>
+        </div>`;
+}
+
+const mfChartCache = {};
+const MF_RANGE_RECORDS = { '1d': 2, '5d': 5, '3mo': 63, '6mo': 126, '1y': 252 };
+const MF_RANGE_LABEL   = { '1d': '1D', '5d': '5D', '3mo': '3M', '6mo': '6M', '1y': '1Y' };
+
+async function fetchMFChart(schemeCode, canvasId, schemeName) {
+    const loading = document.getElementById(`loading-${canvasId}`);
+    const cacheKey = `mf-${schemeCode}`;
+    if (mfChartCache[cacheKey]) {
+        updateMFChart(schemeCode, '1y', canvasId);
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/mf/chart?code=${schemeCode}`);
+        if (!resp.ok) throw new Error('Network error');
+        const data = await resp.json();
+        if (!data.dates || data.dates.length === 0) {
+            if (loading) loading.innerHTML = '<span style="color:var(--val-red)">No chart data.</span>';
+            return;
+        }
+        // Store schemeName alongside data for use by updateMFChart
+        mfChartCache[cacheKey] = { ...data, schemeName };
+        updateMFChart(schemeCode, '1y', canvasId);
+    } catch (e) {
+        if (loading) loading.innerHTML = '<span style="color:var(--val-red)">Error loading chart.</span>';
+    }
+}
+
+function updateMFChart(schemeCode, range, canvasId) {
+    const cacheKey = `mf-${schemeCode}`;
+    const cached = mfChartCache[cacheKey];
+    if (!cached) return; // still loading — fetchMFChart will call updateMFChart when ready
+
+    // Update active button
+    const canvas = document.getElementById(canvasId);
+    if (canvas) {
+        const section = canvas.closest('.mf-chart-section');
+        if (section) {
+            const label = MF_RANGE_LABEL[range];
+            section.querySelectorAll('.range-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent === label);
+            });
+        }
+    }
+
+    // Slice data (newest-first) then reverse to oldest→newest for chart
+    const count = MF_RANGE_RECORDS[range] || 252;
+    const dates = cached.dates.slice(0, count).reverse();
+    const navs  = cached.navs.slice(0, count).reverse();
+
+    const labels = dates.map(d => {
+        const [day, month, year] = d.split('-');
+        return new Date(+year, +month - 1, +day)
+            .toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
+    });
+
+    const isUp = navs[navs.length - 1] >= navs[0];
+    renderChart(canvasId, labels, navs, cached.schemeName || '', range, isUp);
+    const loading = document.getElementById(`loading-${canvasId}`);
+    if (loading) loading.style.display = 'none';
+}
+
+// News hover tooltip
+const newsTooltip = document.createElement('div');
+newsTooltip.className = 'news-tooltip';
+document.body.appendChild(newsTooltip);
+
+function positionTooltip(clientX, clientY) {
+    const margin = 16;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const tw = newsTooltip.offsetWidth;
+    const th = newsTooltip.offsetHeight;
+
+    let left = clientX + margin;
+    let top = clientY + margin;
+
+    if (left + tw > vw - margin) left = clientX - tw - margin;
+    if (top + th > vh - margin) top = clientY - th - margin;
+
+    newsTooltip.style.left = Math.max(margin, left) + 'px';
+    newsTooltip.style.top = Math.max(margin, top) + 'px';
+}
+
+document.addEventListener('mouseover', (e) => {
+    const item = e.target.closest('.news-item, .news-sidebar-item');
+    if (!item) return;
+    const from = e.relatedTarget;
+    if (from && item.contains(from)) return; // still inside, ignore child transitions
+
+    const title = item.dataset.fullTitle || '';
+    if (!title) return;
+
+    newsTooltip.innerHTML = `<div class="news-tooltip-title">${title}</div>`;
+    newsTooltip.classList.add('visible');
+    positionTooltip(e.clientX, e.clientY);
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (newsTooltip.classList.contains('visible')) {
+        positionTooltip(e.clientX, e.clientY);
+    }
+});
+
+document.addEventListener('mouseout', (e) => {
+    const item = e.target.closest('.news-item, .news-sidebar-item');
+    if (!item) return;
+    const to = e.relatedTarget;
+    if (to && item.contains(to)) return; // still inside, ignore child transitions
+    newsTooltip.classList.remove('visible');
+});
 
 // Boot
 updateMarketStatus();

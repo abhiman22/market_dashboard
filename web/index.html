@@ -49,13 +49,21 @@
                 <!-- Sub tabs -->
             </div>
 
+            <!-- Shown only on Mutual Funds > Fund House sub-tab -->
+            <div id="mf-controls" class="mf-controls-bar">
+                <span class="mf-label">Fund House</span>
+                <select id="amc-select" class="glass-select">
+                    <option value="">Select a fund house...</option>
+                </select>
+            </div>
+
             <div class="table-container">
                 <div class="loading-overlay" id="loading-overlay">
                     <div class="spinner"></div>
                     <p>Fetching Real-Time Market Quotes...</p>
                 </div>
                 <table class="market-table">
-                    <thead>
+                    <thead id="table-head">
                         <tr>
                             <th>Symbol</th>
                             <th>Company</th>
