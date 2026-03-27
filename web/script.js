@@ -1,6 +1,6 @@
 const defaultState = {
     "Overview": {
-        "Market": ["^DJI", "^IXIC", "^GSPC", "^BSESN", "^NSEI", "^N225", "^FTSE"]
+        "Market": ["^BSESN", "^NSEI", "^DJI", "^IXIC", "^GSPC", "^N225", "^FTSE"]
     },
     "Commodities": {
         "Metals": ["GOLDBEES.NS", "SILVERBEES.NS", "PL=F"],
@@ -104,7 +104,9 @@ function renderTabs() {
         btn.onclick = () => {
             activeMainTab = mainTab;
             const subTabs = Object.keys(appState[activeMainTab]);
-            if (subTabs.length > 0 && !appState[activeMainTab][activeSubTab]) {
+            if (mainTab === 'Overview') {
+                activeSubTab = 'Market';
+            } else if (subTabs.length > 0 && !appState[activeMainTab][activeSubTab]) {
                 activeSubTab = subTabs[0];
             }
             renderTabs();
@@ -115,6 +117,7 @@ function renderTabs() {
 
     // Render Sub Tabs
     subTabsContainer.innerHTML = '';
+    if (activeMainTab === 'Overview') return;
     const subTabs = Object.keys(appState[activeMainTab] || {});
     subTabs.forEach(subTab => {
         const btn = document.createElement('button');
@@ -199,9 +202,7 @@ async function fetchQuotes() {
         return;
     }
 
-    if (tableBody.innerHTML.includes('No symbols') || tableBody.innerHTML === '') {
-        loadingOverlay.classList.add('active');
-    }
+    loadingOverlay.classList.add('active');
 
     try {
         const queryParams = encodeURIComponent(symbols.join(','));
@@ -287,15 +288,19 @@ function updateRow(tr, q) {
         '<td></td>' :
         `<td><button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button></td>`;
 
+    const dotHtml = activeMainTab === 'Overview'
+        ? `<span class="market-dot market-dot-${getExchangeStatus(getSymbolExchange(q.symbol))}"></span>`
+        : '';
+
     if (q.name === "Fallback") {
         tr.innerHTML = `
-            <td class="symbol-col">${q.symbol}</td>
+            <td class="symbol-col">${dotHtml}${q.symbol}</td>
             <td class="name-col val-red" colspan="6">Data Unavailable</td>
             ${removeBtnHtml}
         `;
     } else {
         tr.innerHTML = `
-            <td class="symbol-col">${q.symbol}</td>
+            <td class="symbol-col">${dotHtml}${q.symbol}</td>
             <td class="name-col">${q.name}</td>
             <td class="right-align price-col">${formatVal(q.currentPrice, q.currency)}</td>
             <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change, q.currency)} <span style="opacity:0.7">${signStr}${q.percentChange.toFixed(2)}%</span></td>
@@ -643,14 +648,12 @@ const REFRESH_INTERVAL = 60000; // 60 seconds
 
 function fetchGeneralNews() {
     const content = document.getElementById('breaking-news-content');
-    if (content.innerHTML === "" || content.innerHTML.includes("Syncing")) {
-        content.innerHTML = `
-            <div class="chart-loading">
-                <div class="spinner" style="width:20px; height:20px; margin-right:10px; margin-bottom:0;"></div>
-                Syncing Global Feeds...
-            </div>
-        `;
-    }
+    content.innerHTML = `
+        <div class="chart-loading">
+            <div class="spinner" style="width:20px; height:20px; margin-right:10px; margin-bottom:0;"></div>
+            Syncing Global Feeds...
+        </div>
+    `;
 
     fetch('/api/news')
         .then(r => r.json())
@@ -661,34 +664,77 @@ function fetchGeneralNews() {
 
 }
 
-function updateMarketStatus() {
-    const bar = document.getElementById('market-status-bar');
+// Exchange open/closed helpers used for market dots
+const EXCHANGE_HOURS = {
+    'NSE':   { tz: 'Asia/Kolkata',       open: 9.25, close: 15.5 },
+    'BSE':   { tz: 'Asia/Kolkata',       open: 9.25, close: 15.5 },
+    'NYSE':  { tz: 'America/New_York',   open: 9.5,  close: 16   },
+    'NASDAQ':{ tz: 'America/New_York',   open: 9.5,  close: 16   },
+    'LSE':   { tz: 'Europe/London',      open: 8,    close: 16.5 },
+    'TSE':   { tz: 'Asia/Tokyo',         open: 9,    close: 15   },
+    'CRYPTO':{ tz: 'UTC',               open: 0,    close: 24   },
+};
+
+const SYMBOL_EXCHANGE_MAP = {
+    '^BSESN': 'BSE', '^NSEI': 'NSE', '^NSEBANK': 'NSE', '^NSEMDCP50': 'NSE',
+    '^CNXIT': 'NSE', '^CNXAUTO': 'NSE', '^CNXFMCG': 'NSE', '^CNXMETAL': 'NSE',
+    '^CNXPHARMA': 'NSE', '^CNXREALTY': 'NSE', 'BSE-MIDCAP.BO': 'BSE', 'BSE-SMLCAP.BO': 'BSE',
+    '^DJI': 'NYSE', '^GSPC': 'NYSE', '^IXIC': 'NASDAQ',
+    '^FTSE': 'LSE', '^N225': 'TSE',
+    'BTC-USD': 'CRYPTO', 'ETH-USD': 'CRYPTO', 'XRP-USD': 'CRYPTO',
+};
+
+function getExchangeStatus(exchange) {
+    const ex = EXCHANGE_HOURS[exchange];
+    if (!ex) return 'closed';
+    if (exchange === 'CRYPTO') return 'open';
     const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { timeZone: ex.tz, hour12: false, hour: 'numeric', minute: 'numeric' });
+    const [h, m] = timeStr.split(':').map(Number);
+    const t = h + m / 60;
+    // Weekend check
+    const dayStr = now.toLocaleDateString('en-US', { timeZone: ex.tz, weekday: 'short' });
+    if (dayStr === 'Sat' || dayStr === 'Sun') return 'closed';
+    if (t >= ex.open && t <= ex.close) return 'open';
+    if (t >= ex.open - 1 && t < ex.open) return 'pre';
+    return 'closed';
+}
 
-    // Market Hours (approximate)
-    const exchanges = [
-        { name: 'NSE/BSE', tz: 'Asia/Kolkata', open: 9.25, close: 15.5 },
-        { name: 'NYSE', tz: 'America/New_York', open: 9.5, close: 16 },
-        { name: 'LSE', tz: 'Europe/London', open: 8, close: 16.5 },
-        { name: 'Nikkei', tz: 'Asia/Tokyo', open: 9, close: 15 }
-    ];
+function getSymbolExchange(symbol) {
+    if (SYMBOL_EXCHANGE_MAP[symbol]) return SYMBOL_EXCHANGE_MAP[symbol];
+    if (symbol.endsWith('.NS')) return 'NSE';
+    if (symbol.endsWith('.BO')) return 'BSE';
+    if (symbol.endsWith('-USD') || symbol.endsWith('-USDT')) return 'CRYPTO';
+    if (symbol.endsWith('=X') || symbol.endsWith('=F')) return 'CRYPTO'; // FX/Commodities always available
+    return 'NYSE';
+}
 
-    bar.innerHTML = exchanges.map(ex => {
-        const timeStr = now.toLocaleTimeString('en-US', { timeZone: ex.tz, hour12: false, hour: 'numeric', minute: 'numeric' });
-        const [h, m] = timeStr.split(':').map(Number);
-        const timeVal = h + (m / 60);
+// Ticker strip symbols and their display labels
+const TICKER_SYMBOLS = ['^BSESN', '^NSEI', 'USDINR=X', 'CL=F', 'BTC-USD'];
+const TICKER_LABELS  = { 'USDINR=X': 'USD/INR', 'CL=F': 'Crude', 'BTC-USD': 'Bitcoin', '^BSESN': 'Sensex', '^NSEI': 'Nifty' };
 
-        let status = 'closed';
-        if (timeVal >= ex.open && timeVal <= ex.close) status = 'open';
-        else if (timeVal >= ex.open - 1 && timeVal < ex.open) status = 'pre';
-
-        return `
-            <div class="status-badge">
-                <span class="status-indicator ${status}"></span>
-                ${ex.name}: ${status.toUpperCase()}
-            </div>
-        `;
-    }).join('');
+async function updateMarketStatus() {
+    const bar = document.getElementById('market-status-bar');
+    try {
+        const res = await fetch('/api/quotes?symbols=' + encodeURIComponent(TICKER_SYMBOLS.join(',')));
+        const rawQuotes = await res.json();
+        const quoteMap = Object.fromEntries(rawQuotes.map(q => [q.symbol, q]));
+        const quotes = TICKER_SYMBOLS.map(s => quoteMap[s]).filter(Boolean);
+        bar.innerHTML = quotes.map(q => {
+            if (q.name === 'Fallback') return '';
+            const label = TICKER_LABELS[q.symbol] || q.symbol;
+            const cls = q.change >= 0 ? 'positive' : 'negative';
+            const arrow = q.change >= 0 ? '▲' : '▼';
+            const sign = q.change >= 0 ? '+' : '';
+            return `<div class="ticker-item">
+                <span class="ticker-name">${label}</span>
+                <span class="ticker-price">${formatVal(q.currentPrice, q.currency)}</span>
+                <span class="ticker-change ${cls}">${arrow} ${sign}${q.percentChange.toFixed(2)}%</span>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        bar.innerHTML = '';
+    }
 }
 
 
@@ -1414,5 +1460,5 @@ renderTabs();
 fetchQuotes();
 initLiveTV();
 setInterval(fetchQuotes, REFRESH_INTERVAL);
-setInterval(updateMarketStatus, 60000); // Update status every minute
+setInterval(updateMarketStatus, 60000);
 

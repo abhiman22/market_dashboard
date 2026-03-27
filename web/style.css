@@ -10,6 +10,7 @@
     --red: #ef4444;
 }
 
+
 * {
     margin: 0;
     padding: 0;
@@ -691,43 +692,62 @@ canvas {
 /* Premium Components */
 .market-status-bar {
     display: flex;
-    gap: 1rem;
-    padding: 0.75rem 1.5rem;
-    background: rgba(0, 0, 0, 0.2);
+    gap: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.25);
     border-bottom: 1px solid var(--glass-border);
-    flex-wrap: wrap;
+    overflow-x: auto;
+    scrollbar-width: none;
 }
+.market-status-bar::-webkit-scrollbar { display: none; }
 
-.status-badge {
+.ticker-item {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.75rem;
+    padding: 0.55rem 1.25rem;
+    border-right: 1px solid var(--glass-border);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.ticker-name {
+    font-size: 0.72rem;
     font-weight: 700;
     color: var(--text-secondary);
-    padding: 0.25rem 0.75rem;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    border: 1px solid var(--glass-border);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
+.ticker-price {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.ticker-change {
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.ticker-change.positive { color: var(--green); }
+.ticker-change.negative { color: var(--red); }
 
-.status-indicator {
-    width: 8px;
-    height: 8px;
+/* Market status dots on symbol rows */
+.market-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+    flex-shrink: 0;
 }
-
-.status-indicator.open {
+.market-dot-open {
     background: var(--green);
-    box-shadow: 0 0 8px var(--green);
+    box-shadow: 0 0 6px var(--green);
     animation: pulse 2s infinite;
 }
-
-.status-indicator.closed {
-    background: #64748b;
+.market-dot-closed {
+    background: #475569;
 }
-
-.status-indicator.pre {
+.market-dot-pre {
     background: #f59e0b;
     animation: pulse 2s infinite;
 }
