@@ -28,7 +28,8 @@ const defaultState = {
         "Small Cap": [],
         "Flexi Cap": [],
         "Fund House": []
-    }
+    },
+    "Portfolio": {}
 };
 
 // Table header HTML for stock tabs vs MF tab
@@ -97,7 +98,7 @@ function saveState() {
 function renderTabs() {
     // Render Main Tabs
     mainTabsContainer.innerHTML = '';
-    Object.keys(appState).forEach(mainTab => {
+    Object.keys(appState).filter(t => t !== 'Portfolio').forEach(mainTab => {
         const btn = document.createElement('button');
         btn.className = `main-tab-btn ${mainTab === activeMainTab ? 'active' : ''}`;
         btn.textContent = mainTab;
@@ -117,7 +118,7 @@ function renderTabs() {
 
     // Render Sub Tabs
     subTabsContainer.innerHTML = '';
-    if (activeMainTab === 'Overview') return;
+    if (activeMainTab === 'Overview' || activeMainTab === 'Portfolio') return;
     const subTabs = Object.keys(appState[activeMainTab] || {});
     subTabs.forEach(subTab => {
         const btn = document.createElement('button');
@@ -154,6 +155,146 @@ function renderTabs() {
 
 }
 
+// =============================================================================
+// Portfolio Tab (CAS Import)
+// =============================================================================
+let casData = null;
+
+function renderPortfolioUpload() {
+    document.getElementById('portfolio-content').innerHTML = `
+        <div class="portfolio-upload-card">
+            <div class="portfolio-upload-icon">📄</div>
+            <h3>Import CAS Statement</h3>
+            <p class="portfolio-upload-hint">Upload your Consolidated Account Statement PDF from CAMS or KFintech.<br>The password is usually your PAN in uppercase.</p>
+            <div class="portfolio-upload-form">
+                <label class="portfolio-file-label" for="cas-file-input">
+                    <span id="cas-file-name">Choose PDF file…</span>
+                </label>
+                <input type="file" id="cas-file-input" accept=".pdf" style="display:none" onchange="document.getElementById('cas-file-name').textContent = this.files[0]?.name || 'Choose PDF file…'">
+                <input type="password" id="cas-password" class="glass-input" placeholder="PDF Password (usually your PAN)" style="width:100%; box-sizing:border-box;">
+                <button class="glass-btn portfolio-upload-btn" onclick="uploadCAS()">Parse Statement</button>
+            </div>
+            <p class="portfolio-setup-hint">Prerequisite: <code>pip install casparser</code></p>
+        </div>
+    `;
+}
+
+async function uploadCAS() {
+    const fileInput = document.getElementById('cas-file-input');
+    const password  = document.getElementById('cas-password').value.trim();
+    if (!fileInput.files[0]) { alert('Please select a PDF file.'); return; }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const base64 = e.target.result.split(',')[1];
+        document.getElementById('portfolio-content').innerHTML = `
+            <div style="display:flex; align-items:center; justify-content:center; padding:5rem; gap:1rem; color:var(--text-secondary);">
+                <div class="spinner" style="width:24px; height:24px; margin:0;"></div>
+                Parsing statement, please wait…
+            </div>`;
+        try {
+            const res  = await fetch('/api/cas/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pdf: base64, password })
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            casData = data;
+            renderPortfolioData(data);
+        } catch (err) {
+            document.getElementById('portfolio-content').innerHTML = `
+                <div class="portfolio-upload-card">
+                    <p style="color:var(--val-red); margin-bottom:1.25rem; font-size:0.9rem;">${err.message}</p>
+                    <button class="glass-btn" onclick="renderPortfolioUpload()">← Try Again</button>
+                </div>`;
+        }
+    };
+    reader.readAsDataURL(fileInput.files[0]);
+}
+
+function renderPortfolioData(data) {
+    const investor = data.investor_info || {};
+    const period   = data.statement_period || {};
+    const folios   = data.folios || [];
+
+    let totalValue = 0, totalInvested = 0;
+    const holdings = [];
+
+    folios.forEach(folio => {
+        (folio.schemes || []).forEach(scheme => {
+            const val = scheme.valuation?.value || 0;
+            totalValue += val;
+            let invested = 0;
+            (scheme.transactions || []).forEach(tx => { if ((tx.amount || 0) > 0) invested += tx.amount; });
+            totalInvested += invested;
+            holdings.push({ amc: folio.amc, scheme: scheme.scheme, units: scheme.close_units || 0,
+                            nav: scheme.valuation?.nav || 0, value: val, invested });
+        });
+    });
+    holdings.sort((a, b) => b.value - a.value);
+
+    const gain    = totalValue - totalInvested;
+    const gainPct = totalInvested > 0 ? (gain / totalInvested) * 100 : 0;
+    const gc      = gain >= 0 ? 'val-green' : 'val-red';
+    const sign    = gain >= 0 ? '+' : '';
+    const fmtINR  = n => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
+    const fmtUnits = n => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+
+    document.getElementById('portfolio-content').innerHTML = `
+        <div class="portfolio-header">
+            <div>
+                <div class="portfolio-investor-name">${investor.name || 'My Portfolio'}</div>
+                <div class="portfolio-period">Statement: ${period.from || ''} – ${period.to || ''} &nbsp;·&nbsp; ${holdings.length} scheme${holdings.length !== 1 ? 's' : ''}</div>
+            </div>
+            <button class="glass-btn" style="font-size:0.75rem;" onclick="casData=null; renderPortfolioUpload()">Upload New</button>
+        </div>
+        <div class="portfolio-summary-cards">
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">Current Value</div>
+                <div class="portfolio-summary-value">${fmtINR(totalValue)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">Total Invested</div>
+                <div class="portfolio-summary-value">${fmtINR(totalInvested)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">Gain / Loss</div>
+                <div class="portfolio-summary-value ${gc}">${sign}${fmtINR(gain)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">Absolute Return</div>
+                <div class="portfolio-summary-value ${gc}">${sign}${gainPct.toFixed(1)}%</div>
+            </div>
+        </div>
+        <div class="portfolio-table-wrapper">
+            <table class="market-table">
+                <thead><tr>
+                    <th>Scheme</th>
+                    <th>AMC</th>
+                    <th class="right-align">Units</th>
+                    <th class="right-align">NAV (₹)</th>
+                    <th class="right-align">Value (₹)</th>
+                    <th class="right-align">Return</th>
+                </tr></thead>
+                <tbody>${holdings.map(h => {
+                    const g    = h.value - h.invested;
+                    const gPct = h.invested > 0 ? (g / h.invested) * 100 : 0;
+                    const hgc  = g >= 0 ? 'val-green' : 'val-red';
+                    const hs   = g >= 0 ? '+' : '';
+                    return `<tr>
+                        <td class="portfolio-scheme-name">${h.scheme}</td>
+                        <td style="color:var(--text-secondary); font-size:0.8rem; white-space:nowrap;">${h.amc}</td>
+                        <td class="right-align" style="font-family:monospace; font-size:0.85rem;">${fmtUnits(h.units)}</td>
+                        <td class="right-align">₹${h.nav.toLocaleString('en-IN', {maximumFractionDigits:2})}</td>
+                        <td class="right-align" style="font-weight:600;">₹${Math.round(h.value).toLocaleString('en-IN')}</td>
+                        <td class="right-align ${hgc}">${hs}${gPct.toFixed(1)}%</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>
+        </div>`;
+}
+
 function formatVal(val, currency = 'INR') {
     const locale = currency === 'INR' ? 'en-IN' : 'en-US';
     const formatter = new Intl.NumberFormat(locale, {
@@ -176,6 +317,23 @@ function getColorClass(val) {
 }
 
 async function fetchQuotes() {
+    const portfolioEl = document.getElementById('portfolio-content');
+    const tableContainerEl = document.querySelector('.table-container');
+
+    if (activeMainTab === 'Portfolio') {
+        tableContainerEl.style.display = 'none';
+        portfolioEl.style.display = 'block';
+        document.getElementById('overview-extras').classList.remove('active');
+        loadingOverlay.classList.remove('active');
+        mfControls.style.display = 'none';
+        if (casData) renderPortfolioData(casData);
+        else renderPortfolioUpload();
+        return;
+    }
+
+    tableContainerEl.style.display = '';
+    portfolioEl.style.display = 'none';
+
     if (activeMainTab === 'Mutual Funds') {
         await fetchMFData();
         return;
@@ -192,7 +350,6 @@ async function fetchQuotes() {
     if (activeMainTab === 'Overview') {
         overviewExtras.classList.add('active');
         fetchGeneralNews();
-
     } else {
         overviewExtras.classList.remove('active');
     }
