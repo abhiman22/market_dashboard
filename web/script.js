@@ -1,6 +1,6 @@
 const defaultState = {
     "Overview": {
-        "Market": ["^BSESN", "^NSEI", "^DJI", "^IXIC", "^GSPC", "^N225", "^FTSE"]
+        "Market": ["^BSESN", "^NSEI", "^DJI", "^IXIC", "^GSPC", "^N225", "^FTSE", "^HSI", "399001.SZ"]
     },
     "Commodities": {
         "Metals": ["GOLDBEES.NS", "SILVERBEES.NS", "PL=F"],
@@ -545,10 +545,19 @@ async function toggleChart(symbol, tr) {
     updateChart(symbol, '1y', canvasId);
 
     // Fetch News Data (passing name for Google News search)
-    const companyName = tr.querySelector('.name-col').textContent.trim();
+    const INDEX_NEWS_TERMS = {
+        '^BSESN': 'India stock market', '^NSEI': 'India stock market',
+        '^DJI': 'US stock market', '^GSPC': 'US stock market', '^IXIC': 'US stock market Nasdaq',
+        '^N225': 'Japan stock market Nikkei', '^FTSE': 'UK stock market FTSE',
+        '^HSI': 'Hong Kong stock market Hang Seng', '399001.SZ': 'China stock market Shenzhen',
+    };
+    const companyName = (activeMainTab === 'Overview' && INDEX_NEWS_TERMS[symbol])
+        ? INDEX_NEWS_TERMS[symbol]
+        : tr.querySelector('.name-col').textContent.trim();
     fetch(`/api/news?symbol=${encodeURIComponent(symbol)}&name=${encodeURIComponent(companyName)}`)
-        .then(r => r.json())
-        .then(newsData => renderNews(newsData, canvasId));
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(newsData => renderNews(newsData, canvasId))
+        .catch(() => renderNews(null, canvasId));
 }
 
 const chartCache = {};
@@ -854,6 +863,8 @@ const EXCHANGE_HOURS = {
     'NASDAQ':{ tz: 'America/New_York',   open: 9.5,  close: 16   },
     'LSE':   { tz: 'Europe/London',      open: 8,    close: 16.5 },
     'TSE':   { tz: 'Asia/Tokyo',         open: 9,    close: 15   },
+    'HKEX':  { tz: 'Asia/Hong_Kong',    open: 9.5,  close: 16   },
+    'SSE':   { tz: 'Asia/Shanghai',     open: 9.5,  close: 15   },
     'CRYPTO':{ tz: 'UTC',               open: 0,    close: 24   },
 };
 
@@ -862,7 +873,7 @@ const SYMBOL_EXCHANGE_MAP = {
     '^CNXIT': 'NSE', '^CNXAUTO': 'NSE', '^CNXFMCG': 'NSE', '^CNXMETAL': 'NSE',
     '^CNXPHARMA': 'NSE', '^CNXREALTY': 'NSE', 'BSE-MIDCAP.BO': 'BSE', 'BSE-SMLCAP.BO': 'BSE',
     '^DJI': 'NYSE', '^GSPC': 'NYSE', '^IXIC': 'NASDAQ',
-    '^FTSE': 'LSE', '^N225': 'TSE',
+    '^FTSE': 'LSE', '^N225': 'TSE', '^HSI': 'HKEX', '399001.SZ': 'SSE',
     'BTC-USD': 'CRYPTO', 'ETH-USD': 'CRYPTO', 'XRP-USD': 'CRYPTO',
 };
 

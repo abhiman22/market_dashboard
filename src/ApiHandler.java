@@ -137,7 +137,12 @@ public class ApiHandler implements HttpHandler {
         } else if ("/api/chart".equals(path)) {
             handleChart(exchange);
         } else if ("/api/news".equals(path)) {
-            handleNews(exchange);
+            try { handleNews(exchange); }
+            catch (Exception e) {
+                System.err.println("handleNews exception: " + e);
+                e.printStackTrace();
+                try { sendJsonResponse(exchange, 200, "{\"news\":[],\"lexicon\":null,\"semantic\":null}"); } catch (Exception ignored) {}
+            }
         } else if ("/api/search".equals(path)) {
             handleSearch(exchange);
         } else if ("/api/calendar".equals(path)) {
@@ -329,25 +334,27 @@ public class ApiHandler implements HttpHandler {
         }
 
         String decodedName = java.net.URLDecoder.decode(name, StandardCharsets.UTF_8);
-        String searchTerm = decodedName + (symbol != null ? " stock news" : "");
+        boolean alreadyMarketTerm = decodedName.toLowerCase().contains("stock market") || decodedName.toLowerCase().contains("market news");
+        String searchTerm = decodedName + (symbol != null && !alreadyMarketTerm ? " stock news" : "");
         String encodedTerm = java.net.URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
 
         // Source 1: Yahoo Finance RSS (symbol-specific, may not exist for all tickers)
-        String yahooUrl = symbol != null ? "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + symbol : null;
+        String yahooUrl = symbol != null ? "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + java.net.URLEncoder.encode(symbol, StandardCharsets.UTF_8) : null;
         // Source 2: Google News RSS
         String googleUrl = "https://news.google.com/rss/search?q=" + encodedTerm + "&hl=en-IN&gl=IN&ceid=IN:en";
         // Source 3: Bing News RSS — broad coverage, good for Indian tickers not in Yahoo RSS
         String bingUrl = "https://www.bing.com/news/search?q=" + encodedTerm + "&format=rss";
 
-        HttpRequest googleReq = HttpRequest.newBuilder().uri(URI.create(googleUrl)).header("User-Agent", "Mozilla/5.0").build();
-        HttpRequest bingReq   = HttpRequest.newBuilder().uri(URI.create(bingUrl)).header("User-Agent", "Mozilla/5.0").build();
-        CompletableFuture<HttpResponse<String>> googleFuture = apiClient.sendAsyncRequest(googleReq);
-        CompletableFuture<HttpResponse<String>> bingFuture   = apiClient.sendAsyncRequest(bingReq);
+        java.time.Duration NEWS_TIMEOUT = java.time.Duration.ofSeconds(8);
+        HttpRequest googleReq = HttpRequest.newBuilder().uri(URI.create(googleUrl)).header("User-Agent", "Mozilla/5.0").timeout(NEWS_TIMEOUT).build();
+        HttpRequest bingReq   = HttpRequest.newBuilder().uri(URI.create(bingUrl)).header("User-Agent", "Mozilla/5.0").timeout(NEWS_TIMEOUT).build();
+        CompletableFuture<HttpResponse<String>> googleFuture = apiClient.sendAsyncRequest(googleReq).exceptionally(e -> null);
+        CompletableFuture<HttpResponse<String>> bingFuture   = apiClient.sendAsyncRequest(bingReq).exceptionally(e -> null);
 
         CompletableFuture<HttpResponse<String>> yahooFuture = null;
         if (yahooUrl != null) {
-            HttpRequest yahooReq = HttpRequest.newBuilder().uri(URI.create(yahooUrl)).header("User-Agent", "Mozilla/5.0").build();
-            yahooFuture = apiClient.sendAsyncRequest(yahooReq);
+            HttpRequest yahooReq = HttpRequest.newBuilder().uri(URI.create(yahooUrl)).header("User-Agent", "Mozilla/5.0").timeout(NEWS_TIMEOUT).build();
+            yahooFuture = apiClient.sendAsyncRequest(yahooReq).exceptionally(e -> null);
         }
 
         CompletableFuture<Void> allFutures = yahooFuture != null
@@ -355,58 +362,63 @@ public class ApiHandler implements HttpHandler {
             : CompletableFuture.allOf(googleFuture, bingFuture);
 
         final CompletableFuture<HttpResponse<String>> finalYahooFuture = yahooFuture;
-        allFutures.thenAccept(v -> {
-            try {
-                List<NewsItem> allItems = new ArrayList<>();
-                if (finalYahooFuture != null) {
-                    allItems.addAll(parseRssItems(finalYahooFuture.join().body(), "Yahoo Finance", 10));
-                }
-                allItems.addAll(parseRssItems(googleFuture.join().body(), "Google News", 15));
-                allItems.addAll(parseRssItems(bingFuture.join().body(), "Bing News", 10));
+        try {
+            allFutures.thenAccept(v -> {
+                try {
+                    List<NewsItem> allItems = new ArrayList<>();
+                    HttpResponse<String> yahooResp  = finalYahooFuture != null ? finalYahooFuture.join() : null;
+                    HttpResponse<String> googleResp = googleFuture.join();
+                    HttpResponse<String> bingResp   = bingFuture.join();
+                    if (yahooResp  != null && yahooResp.body()  != null) allItems.addAll(parseRssItems(yahooResp.body(),  "Yahoo Finance", 10));
+                    if (googleResp != null && googleResp.body() != null) allItems.addAll(parseRssItems(googleResp.body(), "Google News",   15));
+                    if (bingResp   != null && bingResp.body()   != null) allItems.addAll(parseRssItems(bingResp.body(),   "Bing News",     10));
 
-                // Deduplicate all items across sources by normalised title
-                Map<String, NewsItem> dedupedMap = allItems.stream()
-                    .collect(Collectors.toMap(
-                        item -> item.title.toLowerCase().replaceAll("[^a-z0-9]", ""),
-                        item -> item,
-                        (existing, replacement) -> existing.timestamp >= replacement.timestamp ? existing : replacement
-                    ));
+                    Map<String, NewsItem> dedupedMap = allItems.stream()
+                        .collect(Collectors.toMap(
+                            item -> item.title.toLowerCase().replaceAll("[^a-z0-9]", ""),
+                            item -> item,
+                            (existing, replacement) -> existing.timestamp >= replacement.timestamp ? existing : replacement
+                        ));
 
-                // Filter by trusted sources first
-                List<NewsItem> curatedItems = dedupedMap.values().stream()
-                    .filter(item -> isTrusted(item.title, item.publisher))
-                    .sorted(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed())
-                    .limit(12)
-                    .collect(Collectors.toList());
-
-                // Fallback: if fewer than 3 trusted articles found (common for niche tickers),
-                // fill up with the best remaining deduplicated items so the panel is never empty
-                if (curatedItems.size() < 3) {
-                    Set<String> usedKeys = curatedItems.stream()
-                        .map(i -> i.title.toLowerCase().replaceAll("[^a-z0-9]", ""))
-                        .collect(Collectors.toSet());
-                    List<NewsItem> extras = dedupedMap.values().stream()
-                        .filter(item -> !usedKeys.contains(item.title.toLowerCase().replaceAll("[^a-z0-9]", "")))
+                    List<NewsItem> curatedItems = dedupedMap.values().stream()
+                        .filter(item -> isTrusted(item.title, item.publisher))
                         .sorted(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed())
-                        .limit(12 - curatedItems.size())
+                        .limit(12)
                         .collect(Collectors.toList());
-                    curatedItems.addAll(extras);
-                    curatedItems.sort(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed());
+
+                    if (curatedItems.size() < 3) {
+                        Set<String> usedKeys = curatedItems.stream()
+                            .map(i -> i.title.toLowerCase().replaceAll("[^a-z0-9]", ""))
+                            .collect(Collectors.toSet());
+                        List<NewsItem> extras = dedupedMap.values().stream()
+                            .filter(item -> !usedKeys.contains(item.title.toLowerCase().replaceAll("[^a-z0-9]", "")))
+                            .sorted(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed())
+                            .limit(12 - curatedItems.size())
+                            .collect(Collectors.toList());
+                        curatedItems.addAll(extras);
+                        curatedItems.sort(Comparator.comparingLong((NewsItem i) -> i.timestamp).reversed());
+                    }
+
+                    String lexiconJson = analyzeLexicon(curatedItems);
+                    String semanticJson = analyzeSemantic(curatedItems, decodedName);
+
+                    String newsArrayJson = curatedItems.stream()
+                        .map(item -> String.format("{\"title\":\"%s\", \"link\":\"%s\", \"publisher\":\"%s\", \"date\":\"%s\", \"description\":\"%s\"}",
+                            escapeJson(item.title), escapeJson(item.link), escapeJson(item.publisher), escapeJson(item.date), escapeJson(item.description)))
+                        .collect(Collectors.joining(","));
+
+                    sendJsonResponse(exchange, 200, String.format("{\"news\": [%s], \"lexicon\": %s, \"semantic\": %s}", newsArrayJson, lexiconJson, semanticJson));
+                } catch (Exception e) {
+                    System.err.println("News handler error: " + e);
+                    e.printStackTrace();
+                    try { sendJsonResponse(exchange, 200, "{\"news\": [], \"lexicon\": null, \"semantic\": null}"); } catch (IOException ignored) {}
                 }
-
-                String lexiconJson = analyzeLexicon(curatedItems);
-                String semanticJson = analyzeSemantic(curatedItems, decodedName);
-
-                String newsArrayJson = curatedItems.stream()
-                    .map(item -> String.format("{\"title\":\"%s\", \"link\":\"%s\", \"publisher\":\"%s\", \"date\":\"%s\", \"description\":\"%s\"}",
-                        escapeJson(item.title), escapeJson(item.link), escapeJson(item.publisher), escapeJson(item.date), escapeJson(item.description)))
-                    .collect(Collectors.joining(","));
-
-                sendJsonResponse(exchange, 200, String.format("{\"news\": [%s], \"lexicon\": %s, \"semantic\": %s}", newsArrayJson, lexiconJson, semanticJson));
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }).join();
+            }).join();
+        } catch (Exception e) {
+            System.err.println("News handler outer error: " + e);
+            e.printStackTrace();
+            sendJsonResponse(exchange, 200, "{\"news\": [], \"lexicon\": null, \"semantic\": null}");
+        }
     }
 
     private static class NewsItem {
