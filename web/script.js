@@ -22,6 +22,12 @@ const defaultState = {
     "Cryptocurrencies": {
         "Crypto": ["BTC-USD", "ETH-USD", "XRP-USD"]
     },
+    "US ETFs": {
+        "Broad Market": ["SPY", "QQQ", "VTI", "IWM", "DIA"],
+        "Sectors": ["XLK", "XLF", "XLE", "XLV", "XLI", "XLU", "XLRE"],
+        "Bonds": ["TLT", "BND", "AGG", "HYG", "SHY"],
+        "International": ["EEM", "VEA", "EWJ", "FXI", "INDA"]
+    },
     "Mutual Funds": {
         "Large Cap": [],
         "Mid Cap": [],
@@ -35,6 +41,14 @@ const defaultState = {
 // Table header HTML for stock tabs vs MF tab
 const STOCK_TABLE_HEAD = `<tr>
     <th>Sym</th><th>Company</th>
+    <th class="right-align">Price</th><th class="right-align">Change</th>
+    <th class="right-align">52W H</th>
+    <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th></th></tr>`;
+
+const ETF_TABLE_HEAD = `<tr>
+    <th class="mf-cb-cell"></th>
+    <th>Sym</th><th>Name</th>
     <th class="right-align">Price</th><th class="right-align">Change</th>
     <th class="right-align">52W H</th>
     <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
@@ -103,6 +117,14 @@ function renderTabs() {
         btn.className = `main-tab-btn ${mainTab === activeMainTab ? 'active' : ''}`;
         btn.textContent = mainTab;
         btn.onclick = () => {
+            if (activeMainTab === 'US ETFs' && mainTab !== 'US ETFs') {
+                selectedETFs.clear();
+                updateETFCompareBar();
+            }
+            if (activeMainTab === 'Mutual Funds' && mainTab !== 'Mutual Funds') {
+                selectedMFunds.clear();
+                updateCompareBar();
+            }
             activeMainTab = mainTab;
             const subTabs = Object.keys(appState[activeMainTab]);
             if (mainTab === 'Overview') {
@@ -339,8 +361,8 @@ async function fetchQuotes() {
         return;
     }
 
-    // Restore stock table headers when switching away from MF tab
-    tableHead.innerHTML = STOCK_TABLE_HEAD;
+    // Set table headers based on active tab
+    tableHead.innerHTML = activeMainTab === 'US ETFs' ? ETF_TABLE_HEAD : STOCK_TABLE_HEAD;
     mfControls.style.display = 'none';
 
     let symbols = appState[activeMainTab]?.[activeSubTab] || [];
@@ -380,7 +402,10 @@ async function fetchQuotes() {
         const currentSymbols = currentRows.map(r => r.getAttribute('data-symbol'));
         const needsStructuralUpdate = JSON.stringify(currentSymbols) !== JSON.stringify(tableSymbols);
 
-        if (needsStructuralUpdate) {
+        if (activeMainTab === 'US ETFs') {
+            tableBody.innerHTML = '';
+            tableQuotes.forEach(q => tableBody.appendChild(createETFRow(q)));
+        } else if (needsStructuralUpdate) {
             tableBody.innerHTML = '';
             tableQuotes.forEach((q) => {
                 tableBody.appendChild(createRow(q));
@@ -982,8 +1007,6 @@ async function loadAmcList() {
 }
 
 function renderMFTable(funds) {
-    selectedMFunds.clear();
-    updateCompareBar();
     tableBody.innerHTML = '';
     if (!funds || funds.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--text-secondary);">No funds found.</td></tr>`;
@@ -1374,16 +1397,22 @@ function renderCompareModalContent(body) {
     ).join('');
 
     body.innerHTML = `
-        <div class="mf-compare-range-row">
-            <div class="range-selector">${rangeButtons}</div>
-            <span class="mf-compare-range-note">Normalized to 100 at start of period</span>
-        </div>
-        <div class="mf-compare-chart-wrap">
-            <div id="mf-compare-chart-loading" class="chart-loading">
-                <div class="spinner" style="width:22px;height:22px;margin-right:10px;margin-bottom:0;"></div>
-                Building comparison...
+        <div class="mf-compare-chart-section" id="mf-compare-chart-section">
+            <div class="mf-compare-chart-toggle-row">
+                <span class="mf-compare-chart-toggle-label">Performance Chart</span>
+                <button class="glass-btn mf-compare-chart-toggle-btn" onclick="toggleCompareChart()">Hide ▴</button>
             </div>
-            <canvas id="mf-compare-canvas" style="display:none;"></canvas>
+            <div class="mf-compare-range-row">
+                <div class="range-selector">${rangeButtons}</div>
+                <span class="mf-compare-range-note">Normalized to 100 at start of period</span>
+            </div>
+            <div class="mf-compare-chart-wrap">
+                <div id="mf-compare-chart-loading" class="chart-loading">
+                    <div class="spinner" style="width:22px;height:22px;margin-right:10px;margin-bottom:0;"></div>
+                    Building comparison...
+                </div>
+                <canvas id="mf-compare-canvas" style="display:none;"></canvas>
+            </div>
         </div>
         <div class="mf-compare-metrics-section">
             ${buildCompareMetricsTable(compareFundsData)}
@@ -1392,6 +1421,23 @@ function renderCompareModalContent(body) {
 
     renderCompareChart(compareFundsData, compareRange);
 }
+
+window.toggleCompareChart = function () {
+    const section = document.getElementById('mf-compare-chart-section');
+    const btn = section.querySelector('.mf-compare-chart-toggle-btn');
+    const isVisible = section.dataset.collapsed !== 'true';
+    if (isVisible) {
+        section.querySelector('.mf-compare-chart-wrap').style.display = 'none';
+        section.querySelector('.mf-compare-range-row').style.display = 'none';
+        btn.textContent = 'Show ▾';
+        section.dataset.collapsed = 'true';
+    } else {
+        section.querySelector('.mf-compare-chart-wrap').style.display = '';
+        section.querySelector('.mf-compare-range-row').style.display = '';
+        btn.textContent = 'Hide ▴';
+        section.dataset.collapsed = 'false';
+    }
+};
 
 window.switchCompareRange = function (range) {
     compareRange = range;
@@ -1586,6 +1632,361 @@ function buildCompareMetricsTable(fundsData) {
 }
 
 // =============================================================================
+// US ETFs — Row + Compare
+// =============================================================================
+
+const selectedETFs   = new Map(); // symbol → quote object
+const ETF_COMPARE_MAX = 5;
+const ETF_RANGE_LABEL = { '3mo': '3M', '6mo': '6M', '1y': '1Y', '3y': '3Y' };
+const ETF_RANGE_DAYS  = { '3mo': 90,   '6mo': 180,  '1y': 365,  '3y': 1095 };
+let etfCompareRange = '1y';
+let etfCompareFundsData = [];
+let handleETFCompareEsc = null;
+const etfChartCache = {};
+
+function createETFRow(q) {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-symbol', q.symbol);
+
+    const cbTd = document.createElement('td');
+    cbTd.className = 'mf-cb-cell';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selectedETFs.has(q.symbol);
+    cb.addEventListener('change', () => handleETFCheckboxChange(q, cb));
+    cbTd.appendChild(cb);
+    tr.appendChild(cbTd);
+
+    // Reuse updateRow on a temp element then move cells across
+    const temp = document.createElement('tr');
+    updateRow(temp, q);
+    while (temp.firstChild) tr.appendChild(temp.firstChild);
+
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('.mf-cb-cell') || e.target.closest('.remove-btn')) return;
+        toggleChart(q.symbol, tr);
+    });
+    return tr;
+}
+
+function handleETFCheckboxChange(q, cb) {
+    if (cb.checked) {
+        if (selectedETFs.size >= ETF_COMPARE_MAX) { cb.checked = false; return; }
+        selectedETFs.set(q.symbol, q);
+    } else {
+        selectedETFs.delete(q.symbol);
+    }
+    updateETFCompareBar();
+}
+
+function updateETFCompareBar() {
+    const bar = document.getElementById('etf-compare-bar');
+    const countEl = document.getElementById('etf-compare-count');
+    const n = selectedETFs.size;
+    if (n >= 2) {
+        bar.style.display = 'flex';
+        countEl.textContent = `${n} ETF${n > 1 ? 's' : ''} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+async function openETFCompareModal() {
+    const modal = document.getElementById('etf-compare-modal');
+    const body  = document.getElementById('etf-compare-dialog-body');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    body.innerHTML = `<div class="chart-loading" style="height:200px"><div class="spinner"></div></div>`;
+
+    const etfs = Array.from(selectedETFs.values());
+    etfCompareRange = '1y';
+
+    try {
+        await Promise.all(etfs.map(q => fetchETFChartData(q.symbol, q.name)));
+    } catch (e) {
+        body.innerHTML = `<p style="color:var(--val-red);padding:2rem;">Failed to load chart data.</p>`;
+        return;
+    }
+
+    etfCompareFundsData = etfs.map(q => {
+        const cached = etfChartCache[q.symbol] || null;
+        return { q, chartData: cached, metrics: cached ? calcETFMetrics(cached.closes) : {} };
+    });
+
+    renderETFCompareModalContent(body);
+    document.querySelector('#etf-compare-modal .etf-compare-backdrop').onclick = closeETFCompareModal;
+    handleETFCompareEsc = (e) => { if (e.key === 'Escape') closeETFCompareModal(); };
+    document.addEventListener('keydown', handleETFCompareEsc);
+}
+
+function closeETFCompareModal() {
+    document.getElementById('etf-compare-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    const existing = Chart.getChart('etf-compare-canvas');
+    if (existing) existing.destroy();
+    if (handleETFCompareEsc) {
+        document.removeEventListener('keydown', handleETFCompareEsc);
+        handleETFCompareEsc = null;
+    }
+}
+
+async function fetchETFChartData(symbol, name) {
+    if (etfChartCache[symbol]) return etfChartCache[symbol];
+    const resp = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=5y`);
+    if (!resp.ok) throw new Error('Network error');
+    const json = await resp.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) throw new Error('No data for ' + symbol);
+    const timestamps = result.timestamp || [];
+    const closes     = result.indicators?.quote?.[0]?.close || [];
+    etfChartCache[symbol] = { timestamps, closes, symbol, name };
+    return etfChartCache[symbol];
+}
+
+function calcETFMetrics(closes) {
+    const prices = closes.filter(c => c != null && !isNaN(c));
+    const n = prices.length;
+    if (n < 2) return {};
+
+    const dailyRets = [];
+    for (let i = 1; i < n; i++) {
+        if (prices[i] > 0 && prices[i - 1] > 0)
+            dailyRets.push(Math.log(prices[i] / prices[i - 1]));
+    }
+
+    const mean = dailyRets.reduce((s, r) => s + r, 0) / dailyRets.length;
+    const variance = dailyRets.reduce((s, r) => s + (r - mean) ** 2, 0) / dailyRets.length;
+    const volatility = Math.sqrt(variance * 252) * 100;
+
+    let peak = prices[0], maxDD = 0;
+    for (const p of prices) {
+        if (p > peak) peak = p;
+        const dd = (peak - p) / peak;
+        if (dd > maxDD) maxDD = dd;
+    }
+
+    const ret = (days) => n > days
+        ? ((prices[n - 1] - prices[n - 1 - days]) / prices[n - 1 - days]) * 100
+        : null;
+
+    const years = n / 252;
+    const annRet = prices[0] > 0 ? (Math.pow(prices[n - 1] / prices[0], 1 / years) - 1) * 100 : null;
+    const sharpe = volatility > 0 && annRet != null ? annRet / volatility : null;
+
+    return {
+        ret1m: ret(21), ret3m: ret(63), ret6m: ret(126),
+        ret1y: ret(252), ret3y: ret(756),
+        volatility, maxDrawdown: maxDD * 100, sharpe
+    };
+}
+
+function renderETFCompareModalContent(body) {
+    const rangeButtons = Object.keys(ETF_RANGE_LABEL).map(r =>
+        `<button class="range-btn${r === etfCompareRange ? ' active' : ''}" onclick="switchETFCompareRange('${r}')">${ETF_RANGE_LABEL[r]}</button>`
+    ).join('');
+
+    body.innerHTML = `
+        <div class="mf-compare-chart-section" id="etf-compare-chart-section">
+            <div class="mf-compare-chart-toggle-row">
+                <span class="mf-compare-chart-toggle-label">Performance Chart</span>
+                <button class="glass-btn mf-compare-chart-toggle-btn" onclick="toggleETFCompareChart()">Hide ▴</button>
+            </div>
+            <div class="mf-compare-range-row">
+                <div class="range-selector">${rangeButtons}</div>
+                <span class="mf-compare-range-note">Normalized to 100 at start of period</span>
+            </div>
+            <div class="mf-compare-chart-wrap">
+                <div id="etf-compare-chart-loading" class="chart-loading">
+                    <div class="spinner" style="width:22px;height:22px;margin-right:10px;margin-bottom:0;"></div>
+                    Building comparison...
+                </div>
+                <canvas id="etf-compare-canvas" style="display:none;"></canvas>
+            </div>
+        </div>
+        <div class="mf-compare-metrics-section">
+            ${buildETFCompareMetricsTable(etfCompareFundsData)}
+        </div>
+    `;
+    renderETFCompareChart(etfCompareFundsData, etfCompareRange);
+}
+
+window.switchETFCompareRange = function (range) {
+    etfCompareRange = range;
+    document.querySelectorAll('#etf-compare-dialog-body .range-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === ETF_RANGE_LABEL[range]);
+    });
+    renderETFCompareChart(etfCompareFundsData, range);
+};
+
+window.toggleETFCompareChart = function () {
+    const section = document.getElementById('etf-compare-chart-section');
+    const btn = section.querySelector('.mf-compare-chart-toggle-btn');
+    const isVisible = section.dataset.collapsed !== 'true';
+    if (isVisible) {
+        section.querySelector('.mf-compare-chart-wrap').style.display = 'none';
+        section.querySelector('.mf-compare-range-row').style.display = 'none';
+        btn.textContent = 'Show ▾';
+        section.dataset.collapsed = 'true';
+    } else {
+        section.querySelector('.mf-compare-chart-wrap').style.display = '';
+        section.querySelector('.mf-compare-range-row').style.display = '';
+        btn.textContent = 'Hide ▴';
+        section.dataset.collapsed = 'false';
+    }
+};
+
+function renderETFCompareChart(fundsData, range) {
+    const loading = document.getElementById('etf-compare-chart-loading');
+    const canvas  = document.getElementById('etf-compare-canvas');
+    if (!loading || !canvas) return;
+
+    const days   = ETF_RANGE_DAYS[range] || 365;
+    const cutoff = Date.now() / 1000 - days * 86400;
+    const datasets = [];
+    let sharedLabels = null;
+
+    fundsData.forEach(({ q, chartData }, i) => {
+        if (!chartData || !chartData.timestamps || chartData.timestamps.length === 0) return;
+
+        const filtered = chartData.timestamps
+            .map((t, idx) => ({ t, c: chartData.closes[idx] }))
+            .filter(d => d.t >= cutoff && d.c != null);
+
+        if (filtered.length === 0) return;
+
+        if (!sharedLabels) {
+            sharedLabels = filtered.map(d =>
+                new Date(d.t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
+            );
+        }
+
+        const prices = filtered.map(d => d.c);
+        const base   = prices[0] || 1;
+        const normalized = prices.map(v => parseFloat(((v / base) * 100).toFixed(2)));
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+
+        datasets.push({
+            label: q.name || q.symbol,
+            data: normalized,
+            borderColor: color,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            fill: false,
+            tension: 0.1
+        });
+    });
+
+    if (datasets.length === 0) {
+        loading.innerHTML = '<span style="color:var(--val-red)">Chart data unavailable.</span>';
+        return;
+    }
+
+    loading.style.display = 'none';
+    canvas.style.display = 'block';
+
+    requestAnimationFrame(() => {
+        const existing = Chart.getChart('etf-compare-canvas');
+        if (existing) existing.destroy();
+
+        new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: sharedLabels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600, easing: 'easeOutQuart' },
+                plugins: {
+                    legend: {
+                        display: true, position: 'top',
+                        labels: { color: '#94a3b8', font: { size: 11, family: 'Inter' }, boxWidth: 20, padding: 14 }
+                    },
+                    tooltip: {
+                        mode: 'index', intersect: false,
+                        backgroundColor: 'rgba(15,23,42,0.95)',
+                        titleColor: '#94a3b8', bodyColor: '#f1f5f9',
+                        borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, padding: 10,
+                        callbacks: {
+                            label: ctx => {
+                                const val  = ctx.parsed.y;
+                                const gain = val - 100;
+                                const sign = gain >= 0 ? '+' : '';
+                                return `${ctx.dataset.label}: ${val.toFixed(2)} (${sign}${gain.toFixed(2)}%)`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { display: true, grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+                    y: { display: true, beginAtZero: false, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', callback: v => v.toFixed(0) } }
+                }
+            }
+        });
+    });
+}
+
+function buildETFCompareMetricsTable(fundsData) {
+    const fmtRet = v => v != null ? `<span class="${v > 0 ? 'val-green' : v < 0 ? 'val-red' : ''}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>` : '<span class="mf-na">—</span>';
+    const fmtPct = v => v != null ? `${v.toFixed(2)}%` : '<span class="mf-na">—</span>';
+    const fmtNum = v => v != null ? v.toFixed(2) : '<span class="mf-na">—</span>';
+    const fmtUSD = v => v != null ? `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '<span class="mf-na">—</span>';
+
+    const METRICS = [
+        { section: 'Current' },
+        { label: 'Price (USD)',     get: d => d.q.currentPrice,    lowerBetter: false, fmt: fmtUSD },
+        { label: 'Day Change %',    get: d => d.q.percentChange,   lowerBetter: false, fmt: fmtRet },
+        { label: '52W High',        get: d => d.q.fiftyTwoWeekHigh, lowerBetter: false, fmt: fmtUSD, noHighlight: true },
+        { label: '52W Low',         get: d => d.q.fiftyTwoWeekLow,  lowerBetter: false, fmt: fmtUSD, noHighlight: true },
+        { label: '% from 52W High', get: d => d.q.fiftyTwoWeekHigh ? ((d.q.currentPrice - d.q.fiftyTwoWeekHigh) / d.q.fiftyTwoWeekHigh) * 100 : null, lowerBetter: false, fmt: fmtRet },
+        { section: 'Returns' },
+        { label: '1 Month',   get: d => d.metrics.ret1m,  lowerBetter: false, fmt: fmtRet },
+        { label: '3 Months',  get: d => d.metrics.ret3m,  lowerBetter: false, fmt: fmtRet },
+        { label: '6 Months',  get: d => d.metrics.ret6m,  lowerBetter: false, fmt: fmtRet },
+        { label: '1 Year',    get: d => d.metrics.ret1y,  lowerBetter: false, fmt: fmtRet },
+        { label: '3 Years',   get: d => d.metrics.ret3y,  lowerBetter: false, fmt: fmtRet },
+        { section: 'Risk' },
+        { label: 'Volatility (ann.)', get: d => d.metrics.volatility,   lowerBetter: true,  fmt: fmtPct },
+        { label: 'Max Drawdown',      get: d => d.metrics.maxDrawdown,  lowerBetter: true,  fmt: v => v != null ? `<span class="val-red">${v.toFixed(2)}%</span>` : '<span class="mf-na">—</span>' },
+        { label: 'Sharpe Ratio',      get: d => d.metrics.sharpe,       lowerBetter: false, fmt: v => v != null ? `<span class="${v >= 1 ? 'val-green' : v > 0 ? '' : 'val-red'}">${v.toFixed(2)}</span>` : '<span class="mf-na">—</span>' },
+    ];
+
+    const colCount = fundsData.length + 1;
+    const headerCols = fundsData.map(({ q }, i) => {
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+        return `<th class="fund-col" style="color:${color};">${q.name || q.symbol}</th>`;
+    }).join('');
+
+    const rows = METRICS.map(m => {
+        if (m.section) return `<tr class="mf-compare-section-row"><td colspan="${colCount}">${m.section}</td></tr>`;
+
+        const rawVals = fundsData.map(d => { const v = m.get(d); return (v != null && !isNaN(v)) ? v : null; });
+        const nonNull = rawVals.filter(v => v !== null);
+        let bestVal = null;
+        if (!m.noHighlight && nonNull.length >= 2) {
+            bestVal = m.lowerBetter ? Math.min(...nonNull) : Math.max(...nonNull);
+        }
+
+        const cells = fundsData.map((_, i) => {
+            const v = rawVals[i];
+            if (v === null) return `<td><span class="mf-na">—</span></td>`;
+            const isBest = bestVal !== null && v === bestVal;
+            return `<td${isBest ? ' class="mf-compare-best"' : ''}>${m.fmt(v)}</td>`;
+        }).join('');
+
+        return `<tr><td>${m.label}</td>${cells}</tr>`;
+    }).join('');
+
+    return `
+        <table class="mf-compare-metrics-table mf-compare-metrics-head">
+            <thead><tr><th>Metric</th>${headerCols}</tr></thead>
+        </table>
+        <table class="mf-compare-metrics-table">
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+// =============================================================================
 // Live TV
 // =============================================================================
 
@@ -1610,6 +2011,14 @@ window.setLiveTVChannel = function (idx, btn) {
     iframe.style.display = 'block';
     iframe.src = LIVE_CHANNELS[idx].embedUrl;
 };
+
+document.getElementById('etf-compare-btn').addEventListener('click', openETFCompareModal);
+document.getElementById('etf-compare-clear').addEventListener('click', () => {
+    selectedETFs.clear();
+    document.querySelectorAll('#table-body .mf-cb-cell input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateETFCompareBar();
+});
+document.getElementById('etf-compare-close').addEventListener('click', closeETFCompareModal);
 
 // Boot
 updateMarketStatus();

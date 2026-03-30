@@ -10,3 +10,6 @@
 # IDE Specific
 .vscode/
 .idea/
+
+# Personal / sensitive files
+*.pdf

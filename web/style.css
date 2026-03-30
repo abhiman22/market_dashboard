@@ -1357,6 +1357,30 @@ canvas {
     gap: 0.75rem;
 }
 
+/* Chart section inside compare modal */
+.mf-compare-chart-section {
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 0.75rem 1rem 1rem;
+    margin-bottom: 0.25rem;
+    background: rgba(255,255,255,0.02);
+}
+.mf-compare-chart-toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+.mf-compare-chart-toggle-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.mf-compare-chart-toggle-btn {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.75rem;
+}
+
 /* Range row inside modal */
 .mf-compare-range-row {
     display: flex;
@@ -1374,11 +1398,11 @@ canvas {
 /* Chart area */
 .mf-compare-chart-wrap {
     position: relative;
-    height: 260px;
+    height: 320px;
 }
 
 .mf-compare-chart-wrap canvas {
-    max-height: 260px !important;
+    max-height: 320px !important;
 }
 
 /* Metrics table */
