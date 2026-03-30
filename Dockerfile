@@ -9,8 +9,8 @@ COPY src/ /app/src/
 COPY lib/ /app/lib/
 COPY web/ /app/web/
 
-# Compile the Java application 
-RUN javac -cp "lib/gson.jar:src" src/*.java
+# Compile the Java application
+RUN mkdir -p bin && javac -cp "lib/gson.jar:lib/pdfbox-app-2.0.31.jar:src" src/*.java -d bin
 
 # Run the application
-CMD ["java", "-cp", "lib/gson.jar:src", "App"]
+CMD ["java", "-cp", "lib/gson.jar:lib/pdfbox-app-2.0.31.jar:bin", "App"]

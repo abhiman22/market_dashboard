@@ -6,12 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Compile:**
 ```bash
-javac -cp "lib/gson.jar:src" src/*.java -d bin
+javac -cp "lib/gson.jar:lib/pdfbox-app-2.0.31.jar:src" src/*.java -d bin
 ```
 
 **Run locally:**
 ```bash
-java -cp "lib/gson.jar:bin" App
+java -cp "lib/gson.jar:lib/pdfbox-app-2.0.31.jar:bin" App
 ```
 Server starts on `http://localhost:8080` (override with `PORT` env var).
 
