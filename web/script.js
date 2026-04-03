@@ -536,11 +536,24 @@ async function toggleChart(symbol, tr) {
                     </div>
                     <canvas id="${canvasId}" style="display:none;"></canvas>
                 </div>
-                <div class="news-section" id="news-${canvasId}">
-                    <div class="news-title">Related News</div>
-                    <div class="chart-loading">
-                        <div class="spinner" style="width:20px; height:20px; margin-right:10px; margin-bottom:0;"></div>
-                        Fetching News...
+                <div class="news-section">
+                    <div class="metrics-collapse" id="metrics-collapse-${canvasId}">
+                        <div class="metrics-collapse-header">
+                            <span>Key Metrics</span>
+                        </div>
+                        <div class="metrics-collapse-body" id="metrics-content-${canvasId}">
+                            <div class="metrics-loading">
+                                <div class="spinner" style="width:16px; height:16px; margin-right:8px; margin-bottom:0;"></div>
+                                Computing...
+                            </div>
+                        </div>
+                    </div>
+                    <div id="news-${canvasId}">
+                        <div class="news-title">Related News</div>
+                        <div class="chart-loading">
+                            <div class="spinner" style="width:20px; height:20px; margin-right:10px; margin-bottom:0;"></div>
+                            Fetching News...
+                        </div>
                     </div>
                 </div>
             </div>
@@ -566,6 +579,94 @@ async function toggleChart(symbol, tr) {
         .then(r => r.ok ? r.json() : Promise.reject(r.status))
         .then(newsData => renderNews(newsData, canvasId))
         .catch(() => renderNews(null, canvasId));
+}
+
+
+function computeAndRenderMetrics(prices, canvasId) {
+    const metricsContent = document.getElementById(`metrics-content-${canvasId}`);
+    if (!metricsContent) return;
+
+    const validPrices = prices.filter(p => p !== null && p !== undefined);
+    if (validPrices.length < 10) {
+        metricsContent.innerHTML = '<span style="color:var(--text-secondary);font-size:0.85rem;">Not enough data.</span>';
+        return;
+    }
+
+    const n = validPrices.length;
+    const first = validPrices[0];
+    const last = validPrices[n - 1];
+
+    // Daily returns
+    const dailyReturns = [];
+    for (let i = 1; i < validPrices.length; i++) {
+        if (validPrices[i - 1] !== 0) dailyReturns.push((validPrices[i] - validPrices[i - 1]) / validPrices[i - 1]);
+    }
+
+    // CAGR
+    const years = n / 252;
+    const cagr = Math.pow(last / first, 1 / years) - 1;
+
+    // Annualized Volatility
+    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+    const variance = dailyReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / dailyReturns.length;
+    const annualizedVol = Math.sqrt(variance) * Math.sqrt(252);
+
+    // Sharpe Ratio (risk-free rate 5%)
+    const sharpe = annualizedVol > 0 ? (cagr - 0.05) / annualizedVol : 0;
+
+    // Max Drawdown
+    let peak = validPrices[0], maxDrawdown = 0;
+    for (const p of validPrices) {
+        if (p > peak) peak = p;
+        const dd = (peak - p) / peak;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+    }
+
+    // Best / Worst Day
+    const bestDay = Math.max(...dailyReturns);
+    const worstDay = Math.min(...dailyReturns);
+
+    // Win Rate
+    const winRate = dailyReturns.filter(r => r > 0).length / dailyReturns.length;
+
+    const pct = (v, d = 1) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%`;
+    const cls = (v) => v >= 0 ? 'positive' : 'negative';
+
+    metricsContent.className = 'metrics-grid';
+    metricsContent.innerHTML = `
+        <div class="metric-card">
+            <div class="metric-label">CAGR (1Y)</div>
+            <div class="metric-value ${cls(cagr)}">${pct(cagr)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Sharpe Ratio</div>
+            <div class="metric-value ${sharpe >= 1 ? 'positive' : sharpe >= 0 ? '' : 'negative'}">${sharpe.toFixed(2)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Annualized Vol</div>
+            <div class="metric-value">${(annualizedVol * 100).toFixed(1)}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Max Drawdown</div>
+            <div class="metric-value negative">-${(maxDrawdown * 100).toFixed(1)}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Best Day</div>
+            <div class="metric-value positive">${pct(bestDay)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Worst Day</div>
+            <div class="metric-value negative">${pct(worstDay)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Win Rate</div>
+            <div class="metric-value ${winRate >= 0.5 ? 'positive' : 'negative'}">${(winRate * 100).toFixed(1)}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Trading Days</div>
+            <div class="metric-value">${n}</div>
+        </div>
+    `;
 }
 
 const chartCache = {};
@@ -639,27 +740,14 @@ function processAndRenderChart(chartData, symbol, range, canvasId) {
 
     renderChart(canvasId, labels, prices, symbol, range, isUp);
     loading.style.display = 'none';
+    if (range === '1y') computeAndRenderMetrics(prices, canvasId);
 }
 
 function renderNews(newsData, canvasId) {
     const newsContainer = document.getElementById(`news-${canvasId}`);
-    let sentimentHtml = '';
-    if (newsData && newsData.lexicon) {
-        const l = newsData.lexicon;
-        const badgeClass = `badge-${l.recommendation.toLowerCase()}`;
-        sentimentHtml = `
-            <div class="sentiment-card">
-                <div class="sentiment-header">
-                    <span class="sentiment-title">AI Market Insights (Beta)</span>
-                    <span class="sentiment-badge ${badgeClass}">${l.recommendation}</span>
-                </div>
-                <div class="sentiment-summary">${l.summary}</div>
-            </div>
-        `;
-    }
 
     if (newsData && newsData.news && newsData.news.length > 0) {
-        let newsHtml = sentimentHtml + '<div class="news-title">Related News</div>';
+        let newsHtml = '<div class="news-title">Related News</div>';
         newsData.news.forEach(item => {
             newsHtml += `
                 <a href="${item.link}" target="_blank" class="news-item"
@@ -675,7 +763,7 @@ function renderNews(newsData, canvasId) {
         });
         newsContainer.innerHTML = newsHtml;
     } else {
-        newsContainer.innerHTML = sentimentHtml + '<div class="news-title">Related News</div><div style="color:var(--text-secondary); font-size:0.85rem; padding:1rem;">No news available for this symbol.</div>';
+        newsContainer.innerHTML = '<div class="news-title">Related News</div><div style="color:var(--text-secondary); font-size:0.85rem; padding:1rem;">No news available for this symbol.</div>';
     }
 }
 

@@ -301,6 +301,14 @@ body {
     border-bottom: 1px solid var(--glass-border);
 }
 
+.details-grid {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr;
+    gap: 1.5rem;
+    min-height: 350px;
+    padding: 1rem;
+}
+
 .chart-container {
     padding: 1.5rem;
     height: 350px;
@@ -315,13 +323,66 @@ canvas {
     /* Leave room for range selector */
 }
 
-.details-grid {
-    display: grid;
-    grid-template-columns: 2fr 1.2fr;
-    gap: 1.5rem;
-    min-height: 350px;
-    padding: 1rem;
+/* Collapsible metrics panel in the right column */
+.metrics-collapse {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    background: rgba(255, 255, 255, 0.02);
 }
+
+.metrics-collapse-header {
+    padding: 0.55rem 0.9rem;
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.metrics-collapse-body {
+    padding: 0 0.75rem 0.75rem;
+}
+
+.metrics-loading {
+    display: flex;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    padding: 0.25rem 0;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.metric-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+}
+
+.metric-label {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.2rem;
+    white-space: nowrap;
+}
+
+.metric-value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.metric-value.positive { color: var(--val-green); }
+.metric-value.negative { color: var(--val-red); }
 
 .news-section {
     padding: 1.5rem;
