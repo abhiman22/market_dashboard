@@ -534,6 +534,10 @@ canvas {
 
 .name-col {
     color: var(--text-secondary);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .price-col {

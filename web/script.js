@@ -3,7 +3,8 @@ const defaultState = {
         "Market": ["^BSESN", "^NSEI", "^DJI", "^IXIC", "^GSPC", "^N225", "^FTSE", "^HSI", "399001.SZ"]
     },
     "Commodities": {
-        "Metals": ["GOLDBEES.NS", "SILVERBEES.NS", "PL=F"],
+        "Metals": ["GC=F", "SI=F"],
+        "Base Metals": ["HG=F", "ALI=F", "PL=F", "PA=F"],
         "Energy": ["CL=F", "NG=F", "BZ=F"],
         "Currency": ["USDINR=X", "EURINR=X", "GBPINR=X"]
     },
@@ -52,6 +53,8 @@ const STOCK_TABLE_HEAD = `<tr>
     <th class="right-align">Price</th><th class="right-align">Change</th>
     <th class="right-align">52W H</th>
     <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th class="right-align">Δ YTD</th>
+    <th class="right-align">CAGR 1Y</th>
     <th></th></tr>`;
 
 const ETF_TABLE_HEAD = `<tr>
@@ -60,6 +63,8 @@ const ETF_TABLE_HEAD = `<tr>
     <th class="right-align">Price</th><th class="right-align">Change</th>
     <th class="right-align">52W H</th>
     <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th class="right-align">Δ YTD</th>
+    <th class="right-align">CAGR 1Y</th>
     <th></th></tr>`;
 
 const MF_TABLE_HEAD = `<tr>
@@ -482,10 +487,15 @@ function updateRow(tr, q) {
         ? `<span class="market-dot market-dot-${getExchangeStatus(getSymbolExchange(q.symbol))}"></span>`
         : '';
 
+    const ytdClass = getColorClass(q.ytdChange);
+    const ytdSign = q.ytdChange > 0 ? '+' : '';
+    const cagrClass = getColorClass(q.cagr1y);
+    const cagrSign = q.cagr1y > 0 ? '+' : '';
+
     if (q.name === "Fallback") {
         tr.innerHTML = `
             <td class="symbol-col">${dotHtml}${q.symbol}</td>
-            <td class="name-col val-red" colspan="6">Data Unavailable</td>
+            <td class="name-col val-red" colspan="8">Data Unavailable</td>
             ${removeBtnHtml}
         `;
     } else {
@@ -497,6 +507,8 @@ function updateRow(tr, q) {
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
             <td class="right-align price-col ${deltaClass}">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
+            <td class="right-align price-col ${ytdClass}">${ytdSign}${q.ytdChange.toFixed(2)}%</td>
+            <td class="right-align price-col ${cagrClass}">${cagrSign}${q.cagr1y.toFixed(2)}%</td>
             ${removeBtnHtml}
         `;
     }
@@ -528,7 +540,11 @@ async function toggleChart(symbol, tr) {
                         <button class="range-btn" onclick="updateChart('${symbol}', '5d', '${canvasId}')">5D</button>
                         <button class="range-btn" onclick="updateChart('${symbol}', '1mo', '${canvasId}')">1M</button>
                         <button class="range-btn" onclick="updateChart('${symbol}', '3mo', '${canvasId}')">3M</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '6mo', '${canvasId}')">6M</button>
                         <button class="range-btn active" onclick="updateChart('${symbol}', '1y', '${canvasId}')">1Y</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '3y', '${canvasId}')">3Y</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', '5y', '${canvasId}')">5Y</button>
+                        <button class="range-btn" onclick="updateChart('${symbol}', 'max', '${canvasId}')">MAX</button>
                     </div>
                     <div id="loading-${canvasId}" class="chart-loading">
                         <div class="spinner" style="width:24px; height:24px; margin-right:10px; margin-bottom:0;"></div>
@@ -726,7 +742,8 @@ function processAndRenderChart(chartData, symbol, range, canvasId) {
         if (range === '1d' || range === '5d') {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
-        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: range === '1y' ? '2-digit' : undefined });
+        if (range === 'max' || range === '5y' || range === '3y') return date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: (range === '1y' || range === '6mo') ? '2-digit' : undefined });
     });
 
     // Robust trend detection for Indicies and Stocks

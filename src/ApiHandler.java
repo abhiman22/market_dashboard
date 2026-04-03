@@ -47,12 +47,12 @@ public class ApiHandler implements HttpHandler {
         "associated press", "ap news", "the guardian", "bbc"
     );
 
-    // Commodities Localization Constants
-    private static final String GOLD_SYMBOL = "XAUINR=X";
-    private static final String SILVER_SYMBOL = "XAGINR=X";
-    private static final double TROY_OZ_TO_G = 31.1034768;
-    private static final double GOLD_UNIT_G = 10.0; // 10 grams
-    private static final double SILVER_UNIT_G = 1000.0; // 1 kg
+    // Commodities Localization Constants (GC=F / SI=F are in USD — converted to INR at runtime)
+    private static final String GOLD_SYMBOL   = "GC=F";
+    private static final String SILVER_SYMBOL = "SI=F";
+    private static final double TROY_OZ_TO_G  = 31.1034768;
+    private static final double GOLD_UNIT_G   = 10.0;    // per 10 grams
+    private static final double SILVER_UNIT_G = 1000.0;  // per 1 kg
 
     // AMC names that match the start of scheme names in the mfapi.in dataset
     private static final List<String> KNOWN_AMCS = Arrays.asList(
@@ -90,20 +90,19 @@ public class ApiHandler implements HttpHandler {
         this.mfApiClient = mfApiClient;
     }
 
-    private StockQuote localizeMetal(StockQuote q) {
+    private StockQuote localizeMetal(StockQuote q, double usdToInr) {
         if (q == null) return null;
-        if (!GOLD_SYMBOL.equals(q.getSymbol()) && !SILVER_SYMBOL.equals(q.getSymbol())) {
-            return q;
-        }
+        String sym = q.getSymbol();
+        if (!GOLD_SYMBOL.equals(sym) && !SILVER_SYMBOL.equals(sym)) return q;
 
-        double factor = 1.0;
-        String newName = q.getName();
-        
-        if (GOLD_SYMBOL.equals(q.getSymbol())) {
-            factor = (GOLD_UNIT_G / TROY_OZ_TO_G); // Already in INR
+        // GC=F / SI=F are priced in USD per troy oz — convert to INR per local unit
+        double factor;
+        String newName;
+        if (GOLD_SYMBOL.equals(sym)) {
+            factor = usdToInr * (GOLD_UNIT_G / TROY_OZ_TO_G);
             newName = "Gold (10g)";
-        } else if (SILVER_SYMBOL.equals(q.getSymbol())) {
-            factor = (SILVER_UNIT_G / TROY_OZ_TO_G); // Already in INR
+        } else {
+            factor = usdToInr * (SILVER_UNIT_G / TROY_OZ_TO_G);
             newName = "Silver (1kg)";
         }
 
@@ -115,7 +114,9 @@ public class ApiHandler implements HttpHandler {
             q.getPercentChange(),
             q.getFiftyTwoWeekHigh() * factor,
             q.getFiftyTwoWeekLow() * factor,
-            "INR"
+            "INR",
+            q.getYtdChange(),
+            q.getCagr1y()
         );
     }
 
@@ -189,6 +190,23 @@ public class ApiHandler implements HttpHandler {
         String decodedSymbols = java.net.URLDecoder.decode(symbolsParam, StandardCharsets.UTF_8);
         String[] symbolsArr = decodedSymbols.split(",");
         
+        // Get USD→INR rate for metal conversion (use cache if fresh, else fetch)
+        double usdInrRate = 85.0;
+        StockQuote cachedUsdInr = quoteCache.get("USDINR=X");
+        if (cachedUsdInr != null && cachedUsdInr.getCurrentPrice() > 0) {
+            usdInrRate = cachedUsdInr.getCurrentPrice();
+        } else {
+            try {
+                StockQuote r = apiClient.getQuote("USDINR=X");
+                if (r != null && r.getCurrentPrice() > 0) {
+                    usdInrRate = r.getCurrentPrice();
+                    quoteCache.put("USDINR=X", r);
+                    cacheTimestamps.put("USDINR=X", System.currentTimeMillis());
+                }
+            } catch (Exception ignored) {}
+        }
+        final double usdInr = usdInrRate;
+
         List<StockQuote> quotesList = Collections.synchronizedList(new ArrayList<>());
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         long now = System.currentTimeMillis();
@@ -196,7 +214,7 @@ public class ApiHandler implements HttpHandler {
         for (String symbol : symbolsArr) {
             String trimmed = symbol.trim();
             if (trimmed.isEmpty()) continue;
-            
+
             // Check fresh cache
             if (quoteCache.containsKey(trimmed) && (now - cacheTimestamps.getOrDefault(trimmed, 0L) < CACHE_EXPIRY_MS)) {
                 quotesList.add(quoteCache.get(trimmed));
@@ -206,8 +224,8 @@ public class ApiHandler implements HttpHandler {
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
                     StockQuote q = apiClient.getQuote(trimmed);
-                    // Localization for metals
-                    q = localizeMetal(q);
+                    // Localization for metals (USD→INR conversion)
+                    q = localizeMetal(q, usdInr);
                     
                     quoteCache.put(trimmed, q);
                     cacheTimestamps.put(trimmed, System.currentTimeMillis());
@@ -218,7 +236,7 @@ public class ApiHandler implements HttpHandler {
                     if (quoteCache.containsKey(trimmed)) {
                         quotesList.add(quoteCache.get(trimmed));
                     } else {
-                        quotesList.add(new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0, null));
+                        quotesList.add(new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0, null, 0.0, 0.0));
                     }
                 }
             });
@@ -258,40 +276,6 @@ public class ApiHandler implements HttpHandler {
 
         try {
             String data = apiClient.getHistoricalData(symbol, range);
-            
-            // If it's a metal, scale the historical data to units (already in INR)
-            if (GOLD_SYMBOL.equals(symbol) || SILVER_SYMBOL.equals(symbol)) {
-                double factor = GOLD_SYMBOL.equals(symbol) ? 
-                               (GOLD_UNIT_G / TROY_OZ_TO_G) : 
-                               (SILVER_UNIT_G / TROY_OZ_TO_G);
-
-                com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(data).getAsJsonObject();
-                if (json.has("chart")) {
-                    com.google.gson.JsonObject chart = json.getAsJsonObject("chart");
-                    if (chart.has("result") && !chart.get("result").isJsonNull()) {
-                        com.google.gson.JsonObject result = chart.getAsJsonArray("result").get(0).getAsJsonObject();
-                        com.google.gson.JsonObject indicators = result.getAsJsonObject("indicators");
-                        com.google.gson.JsonArray quotes = indicators.getAsJsonArray("quote");
-                        
-                        if (quotes.size() > 0) {
-                            com.google.gson.JsonObject quoteObj = quotes.get(0).getAsJsonObject();
-                            if (quoteObj.has("close")) {
-                                com.google.gson.JsonArray closeArr = quoteObj.getAsJsonArray("close");
-                                com.google.gson.JsonArray newClose = new com.google.gson.JsonArray();
-                                for (com.google.gson.JsonElement e : closeArr) {
-                                    if (e.isJsonNull()) {
-                                        newClose.add(com.google.gson.JsonNull.INSTANCE);
-                                    } else {
-                                        newClose.add(e.getAsDouble() * factor);
-                                    }
-                                }
-                                quoteObj.add("close", newClose);
-                            }
-                        }
-                    }
-                }
-                data = gson.toJson(json);
-            }
             
             sendJsonResponse(exchange, 200, data);
         } catch (Exception e) {

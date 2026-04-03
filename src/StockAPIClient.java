@@ -21,9 +21,21 @@ public class StockAPIClient {
     }
 
     public StockQuote getQuote(String symbol) throws IOException, InterruptedException {
+        try {
+            // Enriched fetch: 1y monthly data gives us CAGR 1Y + YTD
+            return doGetQuote(symbol, "?range=1y&interval=1mo", true);
+        } catch (IOException e) {
+            // Some symbols (currency crosses, certain futures) don't support 1y/1mo —
+            // fall back to bare URL; CAGR and YTD will be 0
+            return doGetQuote(symbol, "", false);
+        }
+    }
+
+    private StockQuote doGetQuote(String symbol, String params, boolean enriched)
+            throws IOException, InterruptedException {
         String encodedSymbol = java.net.URLEncoder.encode(symbol, java.nio.charset.StandardCharsets.UTF_8);
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(API_URL + encodedSymbol))
+                .uri(URI.create(API_URL + encodedSymbol + params))
                 .header("User-Agent", "Mozilla/5.0")
                 .GET()
                 .build();
@@ -61,21 +73,51 @@ public class StockAPIClient {
                 double percentChange = previousClose != 0 ? (change / previousClose) * 100 : 0.0;
                 String currency = meta.has("currency") ? meta.get("currency").getAsString() : "INR";
 
-                if (currentSymbol.contains("GC=F") || currentSymbol.contains("SI=F")) {
-                    System.out.println(
-                            "DEBUG: Raw Quote for " + currentSymbol + ": Price=" + currentPrice + " Curr=" + currency);
+                double ytdChange = 0.0;
+                double cagr1y = 0.0;
+                if (enriched) {
+                    try {
+                        com.google.gson.JsonArray timestamps = result.getAsJsonArray("timestamp");
+                        com.google.gson.JsonArray closes = result
+                                .getAsJsonObject("indicators")
+                                .getAsJsonArray("quote").get(0).getAsJsonObject()
+                                .getAsJsonArray("close");
+
+                        double firstClose = Double.NaN;
+                        for (int i = 0; i < closes.size(); i++) {
+                            if (!closes.get(i).isJsonNull()) {
+                                firstClose = closes.get(i).getAsDouble();
+                                break;
+                            }
+                        }
+                        if (!Double.isNaN(firstClose) && firstClose != 0) {
+                            cagr1y = ((currentPrice - firstClose) / firstClose) * 100;
+                        }
+
+                        long jan1Epoch = java.time.LocalDate.now().withDayOfYear(1)
+                                .atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond();
+                        double ytdStart = Double.NaN;
+                        for (int i = 0; i < timestamps.size(); i++) {
+                            if (timestamps.get(i).getAsLong() >= jan1Epoch && !closes.get(i).isJsonNull()) {
+                                ytdStart = closes.get(i).getAsDouble();
+                                break;
+                            }
+                        }
+                        if (!Double.isNaN(ytdStart) && ytdStart != 0) {
+                            ytdChange = ((currentPrice - ytdStart) / ytdStart) * 100;
+                        }
+                    } catch (Exception ignored) {}
                 }
 
                 return new StockQuote(currentSymbol, name, currentPrice, change, percentChange, fiftyTwoWeekHigh,
-                        fiftyTwoWeekLow, currency);
+                        fiftyTwoWeekLow, currency, ytdChange, cagr1y);
             } else if (chart.has("error") && !chart.get("error").isJsonNull()) {
                 String errorDesc = chart.getAsJsonObject("error").get("description").getAsString();
                 throw new IOException("API Error for " + symbol + ": " + errorDesc);
             }
         }
 
-        throw new IOException("Failed to get quote for " + symbol + ". Status code: " + response.statusCode()
-                + " Request URL: " + API_URL + encodedSymbol);
+        throw new IOException("Failed to get quote for " + symbol + ". Status code: " + response.statusCode());
     }
 
     public String getHistoricalData(String symbol, String range) throws IOException, InterruptedException {
@@ -85,6 +127,8 @@ public class StockAPIClient {
             interval = "1m";
         else if ("5d".equals(range))
             interval = "15m";
+        else if ("max".equals(range))
+            interval = "1mo";
 
         String url = API_URL + encodedSymbol + "?range=" + range + "&interval=" + interval;
 
