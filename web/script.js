@@ -22,6 +22,14 @@ const defaultState = {
     "Cryptocurrencies": {
         "Crypto": ["BTC-USD", "ETH-USD", "XRP-USD"]
     },
+    "US Stocks": {
+        "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN", "TSLA", "ORCL", "CRM", "ADBE"],
+        "Financials": ["JPM", "BAC", "GS", "WFC", "MS", "V", "MA", "BRK-B", "C", "AXP"],
+        "Healthcare": ["JNJ", "UNH", "PFE", "ABBV", "MRK", "TMO", "ABT", "LLY", "AMGN", "MDT"],
+        "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "PSX", "VLO", "MPC", "OXY", "HAL"],
+        "Consumer": ["HD", "MCD", "NKE", "SBUX", "WMT", "TGT", "COST", "PG", "KO", "PEP"],
+        "Industrials": ["CAT", "BA", "GE", "HON", "UPS", "RTX", "LMT", "MMM", "DE", "FDX"]
+    },
     "US ETFs": {
         "Broad Market": ["SPY", "QQQ", "VTI", "IWM", "DIA"],
         "Sectors": ["XLK", "XLF", "XLE", "XLV", "XLI", "XLU", "XLRE"],
