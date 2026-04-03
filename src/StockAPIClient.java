@@ -22,8 +22,8 @@ public class StockAPIClient {
 
     public StockQuote getQuote(String symbol) throws IOException, InterruptedException {
         try {
-            // Enriched fetch: 1y monthly data gives us CAGR 1Y + YTD
-            return doGetQuote(symbol, "?range=1y&interval=1mo", true);
+            // Enriched fetch: 1y daily data gives us CAGR 1Y + YTD + correct previous close
+            return doGetQuote(symbol, "?range=1y&interval=1d", true);
         } catch (IOException e) {
             // Some symbols (currency crosses, certain futures) don't support 1y/1mo —
             // fall back to bare URL; CAGR and YTD will be 0
@@ -61,17 +61,18 @@ public class StockAPIClient {
 
                 double currentPrice = meta.has("regularMarketPrice") ? meta.get("regularMarketPrice").getAsDouble()
                         : 0.0;
-                double previousClose = meta.has("chartPreviousClose") ? meta.get("chartPreviousClose").getAsDouble()
-                        : currentPrice;
 
                 double fiftyTwoWeekHigh = meta.has("fiftyTwoWeekHigh") ? meta.get("fiftyTwoWeekHigh").getAsDouble()
                         : currentPrice;
                 double fiftyTwoWeekLow = meta.has("fiftyTwoWeekLow") ? meta.get("fiftyTwoWeekLow").getAsDouble()
                         : currentPrice;
 
-                double change = currentPrice - previousClose;
-                double percentChange = previousClose != 0 ? (change / previousClose) * 100 : 0.0;
                 String currency = meta.has("currency") ? meta.get("currency").getAsString() : "INR";
+
+                // Default previous close from meta (works for bare URL fallback)
+                double previousClose = meta.has("chartPreviousClose") && enriched == false
+                        ? meta.get("chartPreviousClose").getAsDouble()
+                        : currentPrice;
 
                 double ytdChange = 0.0;
                 double cagr1y = 0.0;
@@ -83,13 +84,31 @@ public class StockAPIClient {
                                 .getAsJsonArray("quote").get(0).getAsJsonObject()
                                 .getAsJsonArray("close");
 
-                        double firstClose = Double.NaN;
+                        // Collect valid (non-null) closes to derive previous close.
+                        // With range=1y&interval=1d: when market is closed today's bar is the last
+                        // entry and equals regularMarketPrice; the second-to-last is yesterday's close.
+                        // When market is open intraday today's bar is absent and the last entry IS
+                        // yesterday's close.
+                        java.util.List<Double> validCloses = new java.util.ArrayList<>();
                         for (int i = 0; i < closes.size(); i++) {
                             if (!closes.get(i).isJsonNull()) {
-                                firstClose = closes.get(i).getAsDouble();
-                                break;
+                                validCloses.add(closes.get(i).getAsDouble());
                             }
                         }
+                        if (validCloses.size() >= 2) {
+                            double lastClose = validCloses.get(validCloses.size() - 1);
+                            if (Math.abs(lastClose - currentPrice) < 0.01 * currentPrice) {
+                                // last bar is today's settled close → prev close is second-to-last
+                                previousClose = validCloses.get(validCloses.size() - 2);
+                            } else {
+                                // market is open intraday → last bar is yesterday
+                                previousClose = lastClose;
+                            }
+                        } else if (validCloses.size() == 1) {
+                            previousClose = validCloses.get(0);
+                        }
+
+                        double firstClose = validCloses.isEmpty() ? Double.NaN : validCloses.get(0);
                         if (!Double.isNaN(firstClose) && firstClose != 0) {
                             cagr1y = ((currentPrice - firstClose) / firstClose) * 100;
                         }
@@ -108,6 +127,9 @@ public class StockAPIClient {
                         }
                     } catch (Exception ignored) {}
                 }
+
+                double change = currentPrice - previousClose;
+                double percentChange = previousClose != 0 ? (change / previousClose) * 100 : 0.0;
 
                 return new StockQuote(currentSymbol, name, currentPrice, change, percentChange, fiftyTwoWeekHigh,
                         fiftyTwoWeekLow, currency, ytdChange, cagr1y);
