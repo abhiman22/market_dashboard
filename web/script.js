@@ -435,6 +435,8 @@ async function fetchQuotes() {
         console.error("Error fetching data:", error);
     } finally {
         loadingOverlay.classList.remove('active');
+        const ts = document.getElementById('last-updated');
+        if (ts) ts.textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
 }
 
@@ -449,17 +451,16 @@ function renderGeneralNews(news) {
         return;
     }
 
-    content.innerHTML = news.map(item => `
-        <a href="${item.link}" target="_blank" class="news-sidebar-item"
-           data-full-title="${escapeAttr(item.title)}"
->
-            <div class="news-sidebar-headline">${item.title}</div>
-            <div class="news-sidebar-meta">
-                <span class="publisher">${item.publisher}</span>
-                <span>${item.date || 'Just now'}</span>
-            </div>
-        </a>
-    `).join('');
+    content.innerHTML = `<div class="news-card-grid">${news.map(item => {
+        let domain = '';
+        try { domain = new URL(item.link).hostname.replace('www.', ''); } catch(e) {}
+        const favicon = domain ? `<img class="news-favicon" src="https://www.google.com/s2/favicons?domain=${domain}&sz=16" alt="" onerror="this.style.display='none'">` : '';
+        return `
+        <a href="${item.link}" target="_blank" class="news-card" data-full-title="${escapeAttr(item.title)}">
+            <div class="news-card-meta">${favicon}<span class="news-card-publisher">${item.publisher}</span><span class="news-card-date">${item.date || 'Just now'}</span></div>
+            <div class="news-card-headline">${item.title}</div>
+        </a>`;
+    }).join('')}</div>`;
 }
 
 function createRow(q) {
@@ -1082,6 +1083,51 @@ function renderCandleModalChart(chartData) {
 
 // ── End Candle Modal ─────────────────────────────────────────────────────────
 
+// ── Ticker Chart Modal ───────────────────────────────────────────────────────
+
+const TICKER_MODAL_CANVAS_ID = 'ticker-modal-canvas';
+
+window.openTickerModal = function(symbol, label, price, currency) {
+    document.getElementById('ticker-modal-symbol').textContent = label;
+    document.getElementById('ticker-modal-price').textContent = formatVal(price, currency);
+
+    const cid = TICKER_MODAL_CANVAS_ID;
+    document.getElementById('ticker-modal-chart-body').innerHTML = `
+        <div class="range-selector">
+            <button class="range-btn" onclick="updateChart('${symbol}', '1d', '${cid}')">1D</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '5d', '${cid}')">5D</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '1mo', '${cid}')">1M</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '3mo', '${cid}')">3M</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '6mo', '${cid}')">6M</button>
+            <button class="range-btn active" onclick="updateChart('${symbol}', '1y', '${cid}')">1Y</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '3y', '${cid}')">3Y</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', '5y', '${cid}')">5Y</button>
+            <button class="range-btn" onclick="updateChart('${symbol}', 'max', '${cid}')">MAX</button>
+            <button class="range-btn chart-type-btn" onclick="openCandleModal('${symbol}', '${cid}')">Candle</button>
+        </div>
+        <div id="loading-${cid}" class="chart-loading">
+            <div class="spinner" style="width:24px;height:24px;margin-right:10px;margin-bottom:0;"></div>
+            Loading 1-Year History...
+        </div>
+        <div class="ticker-modal-canvas-wrap">
+            <canvas id="${cid}" style="display:none;"></canvas>
+        </div>
+    `;
+
+    document.getElementById('ticker-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    updateChart(symbol, '1y', cid);
+};
+
+window.closeTickerModal = function() {
+    document.getElementById('ticker-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    const existing = Chart.getChart(TICKER_MODAL_CANVAS_ID);
+    if (existing) existing.destroy();
+};
+
+// ── End Ticker Chart Modal ───────────────────────────────────────────────────
+
 window.removeSymbol = function (symbol) {
     const arr = appState[activeMainTab][activeSubTab];
     const index = arr.indexOf(symbol);
@@ -1242,7 +1288,10 @@ async function updateMarketStatus() {
             const cls = q.change >= 0 ? 'positive' : 'negative';
             const arrow = q.change >= 0 ? '▲' : '▼';
             const sign = q.change >= 0 ? '+' : '';
-            return `<div class="ticker-item">
+            const intensity = Math.min(Math.abs(q.percentChange) / 3, 1) * 0.18;
+            const rgb = q.change >= 0 ? '16,185,129' : '239,68,68';
+            const bgStyle = `background:rgba(${rgb},${intensity.toFixed(3)})`;
+            return `<div class="ticker-item" style="${bgStyle}" onclick="openTickerModal('${q.symbol}', '${label}', ${q.currentPrice}, '${q.currency}')">
                 <span class="ticker-name">${label}</span>
                 <span class="ticker-price">${formatVal(q.currentPrice, q.currency)}</span>
                 <span class="ticker-change ${cls}">${arrow} ${sign}${q.percentChange.toFixed(2)}%</span>

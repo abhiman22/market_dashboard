@@ -19,10 +19,10 @@
     <div class="app-container">
         <header class="header">
             <div>
-                <h1 class="gradient-text">Market Insights Dashboard</h1>
-                <p class="subtitle">Real-time Tracker with Cap Indices & Sectors</p>
+                <h1 class="gradient-text">Market Insights</h1>
             </div>
             <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                <span id="last-updated" class="last-updated-label"></span>
                 <div class="search-container">
                     <input type="text" id="symbol-search" class="glass-input" placeholder="Search to add (e.g. TCS)"
                         autocomplete="off">
@@ -184,6 +184,23 @@
             </div>
             <div class="candle-modal-chart-wrap">
                 <canvas id="candle-modal-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticker Chart Modal -->
+    <div id="ticker-modal" style="display:none;">
+        <div class="candle-modal-backdrop" onclick="closeTickerModal()"></div>
+        <div class="candle-modal-dialog">
+            <div class="candle-modal-header">
+                <div class="candle-modal-title">
+                    <span id="ticker-modal-symbol"></span>
+                    <span id="ticker-modal-price"></span>
+                </div>
+                <button class="candle-modal-close-btn" onclick="closeTickerModal()">✕</button>
+            </div>
+            <div id="ticker-modal-chart-body" class="ticker-modal-chart-body">
+                <!-- range selector + loading + canvas injected by JS -->
             </div>
         </div>
     </div>
