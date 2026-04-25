@@ -53,6 +53,7 @@ const STOCK_TABLE_HEAD = `<tr>
     <th class="right-align">Price</th><th class="right-align">Change</th>
     <th class="right-align">52W H</th>
     <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th class="right-align">Δ 52W L</th>
     <th class="right-align">Δ YTD</th>
     <th class="right-align">CAGR 1Y</th>
     <th></th></tr>`;
@@ -63,6 +64,7 @@ const ETF_TABLE_HEAD = `<tr>
     <th class="right-align">Price</th><th class="right-align">Change</th>
     <th class="right-align">52W H</th>
     <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th class="right-align">Δ 52W L</th>
     <th class="right-align">Δ YTD</th>
     <th class="right-align">CAGR 1Y</th>
     <th></th></tr>`;
@@ -390,7 +392,7 @@ async function fetchQuotes() {
     }
 
     if (symbols.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 2rem; color: var(--text-secondary);">No symbols in this tab.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 2rem; color: var(--text-secondary);">No symbols in this tab.</td></tr>`;
         return;
     }
 
@@ -401,7 +403,7 @@ async function fetchQuotes() {
         const response = await fetch(`/api/quotes?symbols=${queryParams}`);
         if (!response.ok) throw new Error('Network error');
         let quotes = await response.json();
-
+        quotes.forEach(q => { if (q.name !== 'Fallback') quotesMap.set(q.symbol, q); });
 
         // 2. Filter quotes for the actual table (only show what's in the sub-tab)
         const tableSymbols = appState[activeMainTab]?.[activeSubTab] || [];
@@ -474,9 +476,12 @@ function createRow(q) {
 function updateRow(tr, q) {
     const changeClass = getColorClass(q.change);
     const deltaHigh = q.fiftyTwoWeekHigh !== 0 ? ((q.currentPrice - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh) * 100 : 0;
+    const deltaLow = q.fiftyTwoWeekLow !== 0 ? ((q.currentPrice - q.fiftyTwoWeekLow) / q.fiftyTwoWeekLow) * 100 : 0;
     const deltaClass = getColorClass(deltaHigh);
+    const deltaLowClass = getColorClass(deltaLow);
     const signStr = q.change > 0 ? '+' : '';
     const deltaSignStr = deltaHigh > 0 ? '+' : '';
+    const deltaLowSignStr = deltaLow > 0 ? '+' : '';
 
     const isDefaultSymbol = defaultState[activeMainTab]?.[activeSubTab]?.includes(q.symbol);
     const removeBtnHtml = isDefaultSymbol ?
@@ -495,7 +500,7 @@ function updateRow(tr, q) {
     if (q.name === "Fallback") {
         tr.innerHTML = `
             <td class="symbol-col">${dotHtml}${q.symbol}</td>
-            <td class="name-col val-red" colspan="8">Data Unavailable</td>
+            <td class="name-col val-red" colspan="9">Data Unavailable</td>
             ${removeBtnHtml}
         `;
     } else {
@@ -507,6 +512,7 @@ function updateRow(tr, q) {
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
             <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
             <td class="right-align price-col ${deltaClass}">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
+            <td class="right-align price-col ${deltaLowClass}">${deltaLowSignStr}${deltaLow.toFixed(2)}%</td>
             <td class="right-align price-col ${ytdClass}">${ytdSign}${q.ytdChange.toFixed(2)}%</td>
             <td class="right-align price-col ${cagrClass}">${cagrSign}${q.cagr1y.toFixed(2)}%</td>
             ${removeBtnHtml}
@@ -515,6 +521,7 @@ function updateRow(tr, q) {
 }
 
 let activeChartSymbol = null;
+const quotesMap = new Map(); // symbol → quote object, kept in sync on every fetch
 
 async function toggleChart(symbol, tr) {
     const existingChartRow = tr.nextElementSibling;
@@ -531,8 +538,12 @@ async function toggleChart(symbol, tr) {
     chartRow.className = 'chart-row';
     const canvasId = `chart-${symbol.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
+    const candleToggleBtn = activeMainTab === 'Overview'
+        ? `<button class="range-btn chart-type-btn" onclick="openCandleModal('${symbol}', '${canvasId}')">Candle</button>`
+        : '';
+
     chartRow.innerHTML = `
-        <td colspan="9">
+        <td colspan="10">
             <div class="details-grid">
                 <div class="chart-container">
                     <div class="range-selector">
@@ -545,6 +556,7 @@ async function toggleChart(symbol, tr) {
                         <button class="range-btn" onclick="updateChart('${symbol}', '3y', '${canvasId}')">3Y</button>
                         <button class="range-btn" onclick="updateChart('${symbol}', '5y', '${canvasId}')">5Y</button>
                         <button class="range-btn" onclick="updateChart('${symbol}', 'max', '${canvasId}')">MAX</button>
+                        ${candleToggleBtn}
                     </div>
                     <div id="loading-${canvasId}" class="chart-loading">
                         <div class="spinner" style="width:24px; height:24px; margin-right:10px; margin-bottom:0;"></div>
@@ -687,6 +699,7 @@ function computeAndRenderMetrics(prices, canvasId) {
 
 const chartCache = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const chartCurrentRange = {}; // canvasId → range string (used by candle modal to open at same range)
 
 async function updateChart(symbol, range, canvasId) {
     const loading = document.getElementById(`loading-${canvasId}`);
@@ -732,10 +745,11 @@ async function updateChart(symbol, range, canvasId) {
 
 function processAndRenderChart(chartData, symbol, range, canvasId) {
     const loading = document.getElementById(`loading-${canvasId}`);
-    const canvas = document.getElementById(canvasId);
     const result = chartData.chart.result[0];
     const timestamps = result.timestamp;
     const prices = result.indicators.quote[0].close;
+
+    chartCurrentRange[canvasId] = range;
 
     const labels = timestamps.map(ts => {
         const date = new Date(ts * 1000);
@@ -746,13 +760,11 @@ function processAndRenderChart(chartData, symbol, range, canvasId) {
         return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: (range === '1y' || range === '6mo') ? '2-digit' : undefined });
     });
 
-    // Robust trend detection for Indicies and Stocks
+    // Robust trend detection for Indices and Stocks
     const validPrices = prices.filter(p => p !== null && p !== undefined);
     let isUp = true;
     if (validPrices.length >= 2) {
-        const firstPrice = validPrices[0];
-        const lastPrice = validPrices[validPrices.length - 1];
-        isUp = lastPrice >= firstPrice;
+        isUp = validPrices[validPrices.length - 1] >= validPrices[0];
     }
 
     renderChart(canvasId, labels, prices, symbol, range, isUp);
@@ -871,6 +883,204 @@ function renderChart(canvasId, labels, prices, symbol, range, isUp) {
         });
     });
 }
+
+// ── Candle Modal ────────────────────────────────────────────────────────────
+
+const CANDLE_INTERVALS = {
+    '1d':  [{ label: '1m', value: '1m' }, { label: '5m', value: '5m' }, { label: '15m', value: '15m' }, { label: '30m', value: '30m' }, { label: '1H', value: '60m' }],
+    '5d':  [{ label: '5m', value: '5m' }, { label: '15m', value: '15m' }, { label: '30m', value: '30m' }, { label: '1H', value: '60m' }],
+    '1mo': [{ label: '1D', value: '1d' }],
+    '3mo': [{ label: '1D', value: '1d' }, { label: '1W', value: '1wk' }],
+    '6mo': [{ label: '1D', value: '1d' }, { label: '1W', value: '1wk' }],
+    '1y':  [{ label: '1D', value: '1d' }, { label: '1W', value: '1wk' }],
+    '3y':  [{ label: '1D', value: '1d' }, { label: '1W', value: '1wk' }, { label: '1M', value: '1mo' }],
+    '5y':  [{ label: '1W', value: '1wk' }, { label: '1M', value: '1mo' }],
+    'max': [{ label: '1M', value: '1mo' }],
+};
+const CANDLE_DEFAULT_INTERVAL = {
+    '1d': '5m', '5d': '15m',
+    '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d',
+    '3y': '1wk', '5y': '1mo', 'max': '1mo'
+};
+const CANDLE_RANGES = [
+    { label: '1D', value: '1d' }, { label: '5D', value: '5d' },
+    { label: '1M', value: '1mo' }, { label: '3M', value: '3mo' },
+    { label: '6M', value: '6mo' }, { label: '1Y', value: '1y' },
+    { label: '3Y', value: '3y' }, { label: '5Y', value: '5y' },
+    { label: 'MAX', value: 'max' }
+];
+
+let candleModalSymbol = null;
+let candleModalRange = '1y';
+let candleModalInterval = '1d';
+const candleChartCache = {};
+
+window.openCandleModal = function(symbol, canvasId) {
+    candleModalSymbol = symbol;
+    candleModalRange = chartCurrentRange[canvasId] || '1y';
+    candleModalInterval = CANDLE_DEFAULT_INTERVAL[candleModalRange];
+
+    const modal = document.getElementById('candle-modal');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    const q = quotesMap.get(symbol);
+    document.getElementById('candle-modal-symbol').textContent = symbol + (q ? ` — ${q.name}` : '');
+    document.getElementById('candle-modal-price').textContent = q ? formatVal(q.currentPrice, q.currency) : '';
+
+    renderCandleModalControls();
+    fetchAndRenderCandleModal();
+};
+
+window.closeCandleModal = function() {
+    document.getElementById('candle-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    const existing = Chart.getChart('candle-modal-canvas');
+    if (existing) existing.destroy();
+};
+
+function renderCandleModalControls() {
+    document.getElementById('candle-range-btns').innerHTML = CANDLE_RANGES.map(r =>
+        `<button class="range-btn${r.value === candleModalRange ? ' active' : ''}"
+         onclick="setCandleRange('${r.value}')">${r.label}</button>`
+    ).join('');
+    renderCandleIntervalBtns();
+}
+
+function renderCandleIntervalBtns() {
+    const intervals = CANDLE_INTERVALS[candleModalRange] || [];
+    document.getElementById('candle-interval-btns').innerHTML = intervals.map(iv =>
+        `<button class="range-btn candle-interval-btn${iv.value === candleModalInterval ? ' active' : ''}"
+         onclick="setCandleInterval('${iv.value}')">${iv.label}</button>`
+    ).join('');
+}
+
+window.setCandleRange = function(range) {
+    candleModalRange = range;
+    candleModalInterval = CANDLE_DEFAULT_INTERVAL[range];
+    renderCandleModalControls();
+    fetchAndRenderCandleModal();
+};
+
+window.setCandleInterval = function(interval) {
+    candleModalInterval = interval;
+    renderCandleIntervalBtns();
+    fetchAndRenderCandleModal();
+};
+
+async function fetchAndRenderCandleModal() {
+    const cacheKey = `${candleModalSymbol}-${candleModalRange}-${candleModalInterval}`;
+    const loading = document.getElementById('candle-modal-loading');
+    const canvas = document.getElementById('candle-modal-canvas');
+
+    if (candleChartCache[cacheKey]) {
+        renderCandleModalChart(candleChartCache[cacheKey]);
+        return;
+    }
+
+    loading.style.display = 'flex';
+    canvas.style.display = 'none';
+
+    try {
+        const res = await fetch(`/api/chart?symbol=${encodeURIComponent(candleModalSymbol)}&range=${candleModalRange}&interval=${candleModalInterval}`);
+        const data = await res.json();
+        if (data.chart?.result?.[0]) {
+            candleChartCache[cacheKey] = data;
+            renderCandleModalChart(data);
+        } else {
+            loading.innerHTML = `<span style="color:var(--val-red)">No data available for this range/interval.</span>`;
+        }
+    } catch(e) {
+        loading.innerHTML = `<span style="color:var(--val-red)">Error loading chart data.</span>`;
+    }
+}
+
+function renderCandleModalChart(chartData) {
+    const loading = document.getElementById('candle-modal-loading');
+    const canvas = document.getElementById('candle-modal-canvas');
+    const result = chartData.chart.result[0];
+    const timestamps = result.timestamp;
+    const q = result.indicators.quote[0];
+
+    const ohlcData = timestamps.map((ts, i) => ({
+        x: ts * 1000,
+        o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i]
+    })).filter(d => d.o != null && d.h != null && d.l != null && d.c != null);
+
+    const isIntraday = candleModalRange === '1d' || candleModalRange === '5d';
+    const timeUnit = isIntraday ? 'hour'
+        : (candleModalInterval === '1mo') ? 'month'
+        : (candleModalInterval === '1wk') ? 'week'
+        : 'day';
+
+    loading.style.display = 'none';
+    canvas.style.display = 'block';
+
+    requestAnimationFrame(() => {
+        const ctx = canvas.getContext('2d');
+        const existing = Chart.getChart('candle-modal-canvas');
+        if (existing) existing.destroy();
+
+        new Chart(ctx, {
+            type: 'candlestick',
+            data: {
+                datasets: [{
+                    label: candleModalSymbol,
+                    data: ohlcData,
+                    color: { up: '#10b981', down: '#ef4444', unchanged: '#94a3b8' },
+                    borderColor: { up: '#10b981', down: '#ef4444', unchanged: '#94a3b8' }
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 400, easing: 'easeOutQuart' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        titleColor: '#94a3b8',
+                        bodyColor: '#f1f5f9',
+                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        borderWidth: 1,
+                        padding: 12,
+                        callbacks: {
+                            label: (ctx) => {
+                                const d = ctx.raw;
+                                if (!d) return '';
+                                const fmt = v => v != null ? (v >= 1000 ? (v / 1000).toFixed(2) + 'k' : v.toFixed(2)) : '—';
+                                return [`O: ${fmt(d.o)}`, `H: ${fmt(d.h)}`, `L: ${fmt(d.l)}`, `C: ${fmt(d.c)}`];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { unit: timeUnit },
+                        display: true,
+                        grid: { display: false },
+                        ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }
+                    },
+                    y: {
+                        display: true,
+                        position: 'right',
+                        beginAtZero: false,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: {
+                            color: '#64748b',
+                            callback: v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toLocaleString('en-IN')
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
+
+// ── End Candle Modal ─────────────────────────────────────────────────────────
 
 window.removeSymbol = function (symbol) {
     const arr = appState[activeMainTab][activeSubTab];

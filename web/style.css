@@ -148,6 +148,10 @@ body {
     border-color: var(--accent);
 }
 
+.chart-type-btn {
+    margin-left: auto;
+}
+
 .search-dropdown {
     position: absolute;
     top: 110%;
@@ -267,7 +271,7 @@ body {
 
 .market-table th {
     text-align: left;
-    padding: 0.65rem 1rem;
+    padding: 0.65rem 0.65rem;
     color: var(--text-secondary);
     font-size: 0.85rem;
     font-weight: 500;
@@ -278,7 +282,7 @@ body {
 }
 
 .market-table td {
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 0.65rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     font-size: 0.95rem;
     transition: background 0.2s ease;
@@ -1541,4 +1545,114 @@ canvas {
     color: var(--accent);
     padding-top: 1rem !important;
     border-bottom: none !important;
+}
+
+/* ── Candle Chart Modal ────────────────────────────────────────────────────── */
+#candle-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.candle-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+.candle-modal-dialog {
+    position: relative;
+    z-index: 1;
+    width: min(98vw, 1200px);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+}
+
+.candle-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--glass-border);
+    flex-shrink: 0;
+}
+
+.candle-modal-title {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+}
+
+#candle-modal-symbol {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+#candle-modal-price {
+    font-size: 1rem;
+    font-weight: 500;
+    font-family: monospace;
+    color: var(--text-secondary);
+}
+
+.candle-modal-close-btn {
+    background: transparent;
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.candle-modal-close-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.candle-modal-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--glass-border);
+    flex-shrink: 0;
+}
+
+.candle-modal-controls .range-selector {
+    margin-bottom: 0;
+}
+
+.candle-interval-row {
+    opacity: 0.85;
+}
+
+.candle-interval-btn {
+    font-size: 0.75rem !important;
+    padding: 0.2rem 0.55rem !important;
+}
+
+.candle-modal-chart-wrap {
+    height: 460px;
+    padding: 0.75rem 1.25rem 1.25rem;
+    position: relative;
 }

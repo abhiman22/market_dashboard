@@ -143,14 +143,23 @@ public class StockAPIClient {
     }
 
     public String getHistoricalData(String symbol, String range) throws IOException, InterruptedException {
+        return getHistoricalData(symbol, range, null);
+    }
+
+    public String getHistoricalData(String symbol, String range, String customInterval) throws IOException, InterruptedException {
         String encodedSymbol = java.net.URLEncoder.encode(symbol, StandardCharsets.UTF_8);
-        String interval = "1d";
-        if ("1d".equals(range))
-            interval = "1m";
-        else if ("5d".equals(range))
-            interval = "15m";
-        else if ("max".equals(range))
-            interval = "1mo";
+        String interval;
+        if (customInterval != null && !customInterval.isEmpty()) {
+            interval = customInterval;
+        } else {
+            interval = "1d";
+            if ("1d".equals(range))
+                interval = "1m";
+            else if ("5d".equals(range))
+                interval = "15m";
+            else if ("max".equals(range))
+                interval = "1mo";
+        }
 
         String url = API_URL + encodedSymbol + "?range=" + range + "&interval=" + interval;
 

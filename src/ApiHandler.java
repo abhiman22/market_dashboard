@@ -261,11 +261,13 @@ public class ApiHandler implements HttpHandler {
         
         String symbol = null;
         String range = "1y";
+        String interval = null;
         for (String param : query.split("&")) {
             String[] pair = param.split("=", 2); // Limit to 2 parts
             if (pair.length == 2) {
                 if ("symbol".equals(pair[0])) symbol = java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
                 if ("range".equals(pair[0])) range = pair[1];
+                if ("interval".equals(pair[0])) interval = pair[1];
             }
         }
 
@@ -275,7 +277,7 @@ public class ApiHandler implements HttpHandler {
         }
 
         try {
-            String data = apiClient.getHistoricalData(symbol, range);
+            String data = apiClient.getHistoricalData(symbol, range, interval);
             
             sendJsonResponse(exchange, 200, data);
         } catch (Exception e) {

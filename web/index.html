@@ -11,6 +11,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
 </head>
 
 <body>
@@ -158,6 +160,31 @@
                 <button id="mf-compare-close">✕</button>
             </div>
             <div class="mf-compare-dialog-body" id="mf-compare-dialog-body"></div>
+        </div>
+    </div>
+
+    <!-- Candle Chart Modal -->
+    <div id="candle-modal" style="display:none;">
+        <div class="candle-modal-backdrop" onclick="closeCandleModal()"></div>
+        <div class="candle-modal-dialog">
+            <div class="candle-modal-header">
+                <div class="candle-modal-title">
+                    <span id="candle-modal-symbol"></span>
+                    <span id="candle-modal-price"></span>
+                </div>
+                <button class="candle-modal-close-btn" onclick="closeCandleModal()">✕</button>
+            </div>
+            <div class="candle-modal-controls">
+                <div id="candle-range-btns" class="range-selector"></div>
+                <div id="candle-interval-btns" class="range-selector candle-interval-row"></div>
+            </div>
+            <div id="candle-modal-loading" class="chart-loading" style="display:none;">
+                <div class="spinner" style="width:24px;height:24px;margin-right:10px;margin-bottom:0;"></div>
+                Loading...
+            </div>
+            <div class="candle-modal-chart-wrap">
+                <canvas id="candle-modal-canvas"></canvas>
+            </div>
         </div>
     </div>
 
