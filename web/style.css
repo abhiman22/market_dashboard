@@ -1731,3 +1731,286 @@ canvas {
     width: 100% !important;
     height: 100% !important;
 }
+
+/* ── Action cell (remove + mobile expand) ───────────────────────────── */
+.action-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    justify-content: flex-end;
+}
+
+.mobile-expand-btn {
+    display: none; /* hidden on desktop */
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(148, 163, 184, 0.5);
+    border-radius: 5px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    padding: 0;
+}
+
+.mobile-expand-btn:hover {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: var(--accent);
+}
+
+/* ── Mobile details strip ────────────────────────────────────────────── */
+.mobile-details-row {
+    display: none; /* only shown on mobile */
+}
+
+.mobile-details-row td {
+    padding: 0 !important;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.mobile-details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--glass-border);
+    border-top: 1px solid var(--glass-border);
+}
+
+.mobile-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.5rem 0.65rem;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.mobile-detail-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.mobile-detail-value {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Mobile Responsive ───────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    body {
+        padding: 0.6rem 0.4rem;
+    }
+
+    .gradient-text {
+        font-size: 1.3rem;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.6rem;
+        margin-bottom: 1rem;
+    }
+
+    .header > div:last-child {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .glass-input {
+        width: 100%;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .last-updated-label {
+        display: none;
+    }
+
+    /* Hide columns tagged for mobile */
+    .hide-mobile {
+        display: none !important;
+    }
+
+    /* Show expand button and details row on mobile */
+    .mobile-expand-btn {
+        display: flex;
+    }
+
+    .mobile-details-row {
+        display: table-row;
+    }
+
+    /* Show company/name below symbol ticker using data attribute */
+    .market-table td.symbol-col {
+        white-space: normal;
+    }
+
+    .market-table td.symbol-col[data-name]::after {
+        content: attr(data-name);
+        display: block;
+        font-size: 0.65rem;
+        color: var(--text-secondary);
+        font-weight: 400;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 90px;
+    }
+
+    /* Tighter table cells */
+    .market-table th,
+    .market-table td {
+        padding: 0.55rem 0.4rem;
+        font-size: 0.82rem;
+    }
+
+    .market-table th:first-child,
+    .market-table td:first-child {
+        padding-left: 0.6rem;
+    }
+
+    /* Tabs */
+    .main-tabs-container,
+    .sub-tabs-container {
+        padding: 0.4rem 0.6rem;
+        gap: 0.3rem;
+    }
+
+    .main-tab-btn {
+        font-size: 0.88rem;
+        padding: 0.4rem 0.65rem;
+    }
+
+    /* Ticker status bar — smaller items */
+    .ticker-item {
+        padding: 0.4rem 0.7rem;
+    }
+
+    .ticker-name {
+        font-size: 0.65rem;
+    }
+
+    .ticker-price {
+        font-size: 0.72rem;
+    }
+
+    /* Details expand panel — stack vertically */
+    .details-grid {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+        min-height: unset;
+    }
+
+    .chart-container {
+        height: 260px;
+        padding: 0.75rem;
+    }
+
+    canvas {
+        max-height: 200px;
+    }
+
+    .news-section {
+        border-left: none;
+        border-top: 1px solid var(--glass-border);
+        max-height: 240px;
+    }
+
+    /* MF detail panel — stack vertically */
+    .mf-detail-panel {
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .mf-metrics-section {
+        flex: unset;
+        border-left: none;
+        border-top: 1px solid var(--glass-border);
+        padding-left: 0;
+        padding-top: 1rem;
+    }
+
+    /* Sentiment grid — single column */
+    .sentiment-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Overview extras — already 1 col at 900px, keep it */
+    .overview-extras {
+        padding: 0 0.75rem 0.75rem;
+    }
+
+    /* Candle / ticker chart modals — full screen */
+    #candle-modal,
+    #ticker-modal {
+        padding: 0;
+    }
+
+    .candle-modal-dialog {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        border: none;
+    }
+
+    .candle-modal-chart-wrap {
+        height: 280px;
+    }
+
+    .ticker-modal-canvas-wrap {
+        height: 280px;
+    }
+
+    /* Compare modals — slide up from bottom */
+    .mf-compare-modal {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    .mf-compare-dialog {
+        width: 100%;
+        max-height: 90vh;
+        border-radius: 20px 20px 0 0;
+    }
+
+    /* MF controls bar */
+    .mf-controls-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.65rem 0.75rem;
+    }
+
+    .glass-select {
+        min-width: 0;
+        width: 100%;
+    }
+
+    /* Portfolio summary — 2 cols on mobile */
+    .portfolio-summary-cards {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .portfolio-upload-card {
+        margin: 1.5rem auto;
+        padding: 1.5rem;
+    }
+
+    /* MF scheme name — tighter on mobile */
+    .mf-scheme-name {
+        max-width: 160px;
+        font-size: 0.8rem;
+    }
+}

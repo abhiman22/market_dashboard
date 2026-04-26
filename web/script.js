@@ -20,7 +20,7 @@ const defaultState = {
         "Energy": ["RELIANCE.NS", "NTPC.NS", "POWERGRID.NS"],
         "Automobile": ["MARUTI.NS", "M&M.NS", "TMCV.NS", "TMPV.NS"]
     },
-    "Cryptocurrencies": {
+    "Crypto": {
         "Crypto": ["BTC-USD", "ETH-USD", "XRP-USD"]
     },
     "US Stocks": {
@@ -49,33 +49,33 @@ const defaultState = {
 
 // Table header HTML for stock tabs vs MF tab
 const STOCK_TABLE_HEAD = `<tr>
-    <th>Sym</th><th>Company</th>
+    <th>Sym</th><th class="hide-mobile">Company</th>
     <th class="right-align">Price</th><th class="right-align">Change</th>
-    <th class="right-align">52W H</th>
-    <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
-    <th class="right-align">Δ 52W L</th>
-    <th class="right-align">Δ YTD</th>
-    <th class="right-align">CAGR 1Y</th>
+    <th class="right-align hide-mobile">52W H</th>
+    <th class="right-align hide-mobile">52W L</th><th class="right-align hide-mobile">Δ 52W H</th>
+    <th class="right-align hide-mobile">Δ 52W L</th>
+    <th class="right-align hide-mobile">Δ YTD</th>
+    <th class="right-align hide-mobile">CAGR 1Y</th>
     <th></th></tr>`;
 
 const ETF_TABLE_HEAD = `<tr>
     <th class="mf-cb-cell"></th>
-    <th>Sym</th><th>Name</th>
+    <th>Sym</th><th class="hide-mobile">Name</th>
     <th class="right-align">Price</th><th class="right-align">Change</th>
-    <th class="right-align">52W H</th>
-    <th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
-    <th class="right-align">Δ 52W L</th>
-    <th class="right-align">Δ YTD</th>
-    <th class="right-align">CAGR 1Y</th>
+    <th class="right-align hide-mobile">52W H</th>
+    <th class="right-align hide-mobile">52W L</th><th class="right-align hide-mobile">Δ 52W H</th>
+    <th class="right-align hide-mobile">Δ 52W L</th>
+    <th class="right-align hide-mobile">Δ YTD</th>
+    <th class="right-align hide-mobile">CAGR 1Y</th>
     <th></th></tr>`;
 
 const MF_TABLE_HEAD = `<tr>
     <th class="mf-cb-cell"></th>
-    <th>Code</th><th>Scheme</th>
+    <th class="hide-mobile">Code</th><th>Scheme</th>
     <th class="right-align">NAV (₹)</th>
     <th class="right-align">Change</th>
-    <th class="right-align">1Y CAGR</th><th class="right-align">3Y CAGR</th>
-    <th class="right-align">52W H</th><th class="right-align">52W L</th><th class="right-align">Δ 52W H</th>
+    <th class="right-align">1Y CAGR</th><th class="right-align hide-mobile">3Y CAGR</th>
+    <th class="right-align hide-mobile">52W H</th><th class="right-align hide-mobile">52W L</th><th class="right-align hide-mobile">Δ 52W H</th>
     <th></th></tr>`;
 
 // Deep merge local storage with default state to ensure we always have the defaults
@@ -469,12 +469,18 @@ function createRow(q) {
     updateRow(tr, q);
     tr.addEventListener('click', (e) => {
         if (e.target.closest('.remove-btn')) return;
+        if (e.target.closest('.mobile-expand-btn')) {
+            e.stopPropagation();
+            toggleMobileDetails(tr);
+            return;
+        }
         toggleChart(q.symbol, tr);
     });
     return tr;
 }
 
 function updateRow(tr, q) {
+    tr._quoteData = q;
     const changeClass = getColorClass(q.change);
     const deltaHigh = q.fiftyTwoWeekHigh !== 0 ? ((q.currentPrice - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh) * 100 : 0;
     const deltaLow = q.fiftyTwoWeekLow !== 0 ? ((q.currentPrice - q.fiftyTwoWeekLow) / q.fiftyTwoWeekLow) * 100 : 0;
@@ -485,9 +491,8 @@ function updateRow(tr, q) {
     const deltaLowSignStr = deltaLow > 0 ? '+' : '';
 
     const isDefaultSymbol = defaultState[activeMainTab]?.[activeSubTab]?.includes(q.symbol);
-    const removeBtnHtml = isDefaultSymbol ?
-        '<td></td>' :
-        `<td><button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button></td>`;
+    const removeBtn = isDefaultSymbol ? '' : `<button class="remove-btn" onclick="removeSymbol('${q.symbol}')">×</button>`;
+    const removeBtnHtml = `<td class="action-cell">${removeBtn}<button class="mobile-expand-btn" aria-label="Show details"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></button></td>`;
 
     const dotHtml = activeMainTab === 'Overview'
         ? `<span class="market-dot market-dot-${getExchangeStatus(getSymbolExchange(q.symbol))}"></span>`
@@ -506,25 +511,86 @@ function updateRow(tr, q) {
         `;
     } else {
         tr.innerHTML = `
-            <td class="symbol-col">${dotHtml}${q.symbol}</td>
-            <td class="name-col">${q.name}</td>
+            <td class="symbol-col" data-name="${escapeAttr(q.name)}">${dotHtml}${q.symbol}</td>
+            <td class="name-col hide-mobile">${q.name}</td>
             <td class="right-align price-col">${formatVal(q.currentPrice, q.currency)}</td>
-            <td class="right-align price-col ${changeClass}">${signStr}${formatVal(q.change, q.currency)} <span style="opacity:0.7">${signStr}${q.percentChange.toFixed(2)}%</span></td>
-            <td class="right-align name-col">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
-            <td class="right-align name-col">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
-            <td class="right-align price-col ${deltaClass}">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
-            <td class="right-align price-col ${deltaLowClass}">${deltaLowSignStr}${deltaLow.toFixed(2)}%</td>
-            <td class="right-align price-col ${ytdClass}">${ytdSign}${q.ytdChange.toFixed(2)}%</td>
-            <td class="right-align price-col ${cagrClass}">${cagrSign}${q.cagr1y.toFixed(2)}%</td>
+            <td class="right-align price-col ${changeClass}"><span class="hide-mobile">${signStr}${formatVal(q.change, q.currency)} </span>${signStr}${q.percentChange.toFixed(2)}%</td>
+            <td class="right-align name-col hide-mobile">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
+            <td class="right-align name-col hide-mobile">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
+            <td class="right-align price-col ${deltaClass} hide-mobile">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
+            <td class="right-align price-col ${deltaLowClass} hide-mobile">${deltaLowSignStr}${deltaLow.toFixed(2)}%</td>
+            <td class="right-align price-col ${ytdClass} hide-mobile">${ytdSign}${q.ytdChange.toFixed(2)}%</td>
+            <td class="right-align price-col ${cagrClass} hide-mobile">${cagrSign}${q.cagr1y.toFixed(2)}%</td>
             ${removeBtnHtml}
         `;
     }
+}
+
+function toggleMobileDetails(tr) {
+    const btn = tr.querySelector('.mobile-expand-btn');
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains('mobile-details-row')) {
+        next.remove();
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg>';
+        return;
+    }
+
+    const q = tr._quoteData;
+    if (!q || q.name === 'Fallback') return;
+
+    const deltaHigh = q.fiftyTwoWeekHigh !== 0 ? ((q.currentPrice - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh) * 100 : 0;
+    const deltaLow  = q.fiftyTwoWeekLow  !== 0 ? ((q.currentPrice - q.fiftyTwoWeekLow)  / q.fiftyTwoWeekLow)  * 100 : 0;
+
+    const fmt = (v, sign) => `${sign && v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+    const cls = v => getColorClass(v);
+
+    const detailsRow = document.createElement('tr');
+    detailsRow.className = 'mobile-details-row';
+    detailsRow.innerHTML = `
+        <td colspan="15">
+            <div class="mobile-details-grid">
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">52W High</span>
+                    <span class="mobile-detail-value">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</span>
+                </div>
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">52W Low</span>
+                    <span class="mobile-detail-value">${formatVal(q.fiftyTwoWeekLow, q.currency)}</span>
+                </div>
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">Δ 52W H</span>
+                    <span class="mobile-detail-value ${cls(deltaHigh)}">${fmt(deltaHigh, true)}</span>
+                </div>
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">Δ 52W L</span>
+                    <span class="mobile-detail-value ${cls(deltaLow)}">${fmt(deltaLow, true)}</span>
+                </div>
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">YTD</span>
+                    <span class="mobile-detail-value ${cls(q.ytdChange)}">${fmt(q.ytdChange, true)}</span>
+                </div>
+                <div class="mobile-detail-item">
+                    <span class="mobile-detail-label">CAGR 1Y</span>
+                    <span class="mobile-detail-value ${cls(q.cagr1y)}">${fmt(q.cagr1y, true)}</span>
+                </div>
+            </div>
+        </td>
+    `;
+    tr.parentNode.insertBefore(detailsRow, tr.nextSibling);
+    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,8 6,4 10,8"/></svg>';
 }
 
 let activeChartSymbol = null;
 const quotesMap = new Map(); // symbol → quote object, kept in sync on every fetch
 
 async function toggleChart(symbol, tr) {
+    // Close mobile details strip if open
+    const maybeDetails = tr.nextElementSibling;
+    if (maybeDetails && maybeDetails.classList.contains('mobile-details-row')) {
+        maybeDetails.remove();
+        tr.querySelector('.mobile-expand-btn').innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg>';
+    }
+
     const existingChartRow = tr.nextElementSibling;
     if (existingChartRow && existingChartRow.classList.contains('chart-row')) {
         existingChartRow.remove();
@@ -1432,15 +1498,15 @@ function createMFRow(mf) {
         .replace(/\s+/g, ' ').trim();
 
     tr.innerHTML = `
-        <td class="symbol-col" style="font-size:0.8rem; color:var(--text-secondary);">${mf.schemeCode}</td>
+        <td class="symbol-col hide-mobile" style="font-size:0.8rem; color:var(--text-secondary);">${mf.schemeCode}</td>
         <td class="mf-scheme-name" title="${escapeAttr(mf.schemeName)}">${displayName}</td>
         <td class="right-align price-col">₹${navFmt}</td>
-        <td class="right-align price-col ${changeClass}">${changeFmt} <span style="opacity:0.7">${pctFmt}</span></td>
+        <td class="right-align price-col ${changeClass}"><span class="hide-mobile">${changeFmt} </span>${pctFmt}</td>
         <td class="right-align price-col">${fmtCagr(mf.cagr1y)}</td>
-        <td class="right-align price-col">${fmtCagr(mf.cagr3y)}</td>
-        <td class="right-align price-col">${high52Fmt}</td>
-        <td class="right-align price-col">${low52Fmt}</td>
-        <td class="right-align price-col ${deltaHighClass}">${deltaHighFmt}</td>
+        <td class="right-align price-col hide-mobile">${fmtCagr(mf.cagr3y)}</td>
+        <td class="right-align price-col hide-mobile">${high52Fmt}</td>
+        <td class="right-align price-col hide-mobile">${low52Fmt}</td>
+        <td class="right-align price-col ${deltaHighClass} hide-mobile">${deltaHighFmt}</td>
         <td></td>
     `;
 
