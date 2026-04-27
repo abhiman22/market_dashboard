@@ -14,6 +14,7 @@ public class App {
         StockAPIClient apiClient = new StockAPIClient();
         MFApiClient mfApiClient = new MFApiClient();
         server.createContext("/api/cas", new CASHandler());
+        server.createContext("/api/market-context", new MarketContextHandler());
         server.createContext("/api/", new ApiHandler(apiClient, mfApiClient));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());

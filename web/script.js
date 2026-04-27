@@ -44,6 +44,7 @@ const defaultState = {
         "Flexi Cap": [],
         "Fund House": []
     },
+    "Market Context": {},
     "Portfolio": {}
 };
 
@@ -155,7 +156,7 @@ function renderTabs() {
 
     // Render Sub Tabs
     subTabsContainer.innerHTML = '';
-    if (activeMainTab === 'Overview' || activeMainTab === 'Portfolio') return;
+    if (activeMainTab === 'Overview' || activeMainTab === 'Portfolio' || activeMainTab === 'Market Context') return;
     const subTabs = Object.keys(appState[activeMainTab] || {});
     subTabs.forEach(subTab => {
         const btn = document.createElement('button');
@@ -785,6 +786,244 @@ function renderPortfolioLegacy(data) {
         </table></div>`;
 }
 
+// =============================================================================
+// Market Context Tab
+// =============================================================================
+
+async function renderMarketContext() {
+    const el = document.getElementById('market-context-content');
+    el.innerHTML = `<div class="mc-loading">
+        <div class="spinner" style="width:24px;height:24px;margin:0 auto 0.75rem;"></div>
+        <p style="color:var(--text-secondary);font-size:0.88rem;">Loading market data…</p>
+    </div>`;
+
+    const [quotesRes, rbiRes, fiiRes, pcrRes] = await Promise.allSettled([
+        fetch('/api/quotes?symbols=%5EINDIAVIX,%5ENSEI,%5ENSEBANK,%5ECNXIT').then(r => r.json()),
+        fetch('/api/market-context/rbi').then(r => r.json()),
+        fetch('/api/market-context/fiidii').then(r => r.json()),
+        fetch('/api/market-context/pcr').then(r => r.json()),
+    ]);
+
+    const quotes  = (quotesRes.status === 'fulfilled' && Array.isArray(quotesRes.value)) ? quotesRes.value : [];
+    const vix     = quotes.find(q => q.symbol === '^INDIAVIX') || null;
+    const nifty   = quotes.find(q => q.symbol === '^NSEI')     || null;
+    const bank    = quotes.find(q => q.symbol === '^NSEBANK')  || null;
+    const it      = quotes.find(q => q.symbol === '^CNXIT')    || null;
+    const rbi     = rbiRes.status === 'fulfilled' && !rbiRes.value?.error   ? rbiRes.value  : null;
+    const fii     = fiiRes.status === 'fulfilled' && !fiiRes.value?.error   ? fiiRes.value  : null;
+    const pcr     = pcrRes.status === 'fulfilled' && !pcrRes.value?.error   ? pcrRes.value  : null;
+
+    el.innerHTML = `
+        ${renderVixPcrSection(vix, pcr, nifty, bank, it)}
+        ${renderRbiSection(rbi)}
+        ${renderFiiDiiSection(fii)}
+    `;
+}
+
+function vixColor(v) {
+    if (v < 12)  return '#10b981';
+    if (v < 16)  return '#22c55e';
+    if (v < 20)  return '#f59e0b';
+    if (v < 25)  return '#f97316';
+    return '#ef4444';
+}
+function vixLabel(v) {
+    if (v < 12)  return 'Very Low — Complacency';
+    if (v < 16)  return 'Low Volatility';
+    if (v < 20)  return 'Normal Range';
+    if (v < 25)  return 'Elevated Fear';
+    if (v < 30)  return 'High Fear';
+    return 'Extreme Fear / Panic';
+}
+function pcrColor(p) {
+    if (p < 0.7)  return '#ef4444';
+    if (p < 0.85) return '#f97316';
+    if (p < 1.0)  return '#f59e0b';
+    if (p < 1.2)  return '#22c55e';
+    return '#10b981';
+}
+
+function renderPcrCard(pcr) {
+    const p    = pcr.pcr;
+    const col  = pcrColor(p);
+    const putOI  = (pcr.putOI  / 1e5).toFixed(2) + ' L';
+    const callOI = (pcr.callOI / 1e5).toFixed(2) + ' L';
+    const niftyPrice = pcr.niftyPrice
+        ? pcr.niftyPrice.toLocaleString('en-IN', {maximumFractionDigits: 2}) : '—';
+    return `
+    <div class="mc-metric-card">
+        <div class="mc-metric-label">NIFTY Put/Call Ratio</div>
+        <div class="mc-metric-value" style="color:${col}">${p.toFixed(2)}</div>
+        <div class="mc-metric-sub" style="color:${col}">${pcr.interpretation}</div>
+        <div class="mc-pcr-detail">
+            <span>NIFTY <strong>${niftyPrice}</strong></span>
+            <span>Put OI <strong>${putOI}</strong></span>
+            <span>Call OI <strong>${callOI}</strong></span>
+        </div>
+        <div class="mc-pcr-scale">
+            <span style="color:#ef4444">Greed</span>
+            <div class="mc-pcr-track">
+                <div class="mc-pcr-thumb" style="left:${Math.min(Math.max((p/2)*100,2),98).toFixed(1)}%;background:${col};"></div>
+            </div>
+            <span style="color:#10b981">Fear</span>
+        </div>
+    </div>`;
+}
+
+function renderNiftyPositioningCard(nifty, bank, it) {
+    const fmtPt  = v => v != null ? v.toLocaleString('en-IN', {maximumFractionDigits: 0}) : '—';
+    const fmtPct = (v, prefix = true) => {
+        if (v == null) return '—';
+        const s = v >= 0 ? '+' : '';
+        const cls = v >= 0 ? 'val-green' : 'val-red';
+        return `<span class="${cls}">${prefix ? s : ''}${v.toFixed(2)}%</span>`;
+    };
+
+    // 52W range position as a percentage (where in the range is current price?)
+    const rangePos = nifty
+        ? Math.min(((nifty.currentPrice - nifty.fiftyTwoWeekLow) /
+           (nifty.fiftyTwoWeekHigh - nifty.fiftyTwoWeekLow)) * 100, 100).toFixed(1)
+        : 50;
+    const rangeCol = rangePos > 75 ? '#f59e0b' : rangePos < 25 ? '#10b981' : '#60a5fa';
+
+    const indices = [
+        { label: 'NIFTY 50',   q: nifty },
+        { label: 'Bank NIFTY', q: bank  },
+        { label: 'NIFTY IT',   q: it    },
+    ];
+
+    return `
+    <div class="mc-metric-card">
+        <div class="mc-metric-label">Market Positioning</div>
+        ${nifty ? `
+        <div class="mc-metric-value" style="color:#60a5fa">${fmtPt(nifty.currentPrice)}</div>
+        <div class="mc-metric-sub" style="color:var(--text-secondary)">NIFTY 50 — 52W position</div>
+        <div class="mc-vix-bar-wrap">
+            <div class="mc-vix-bar">
+                <div class="mc-vix-bar-fill" style="width:${rangePos}%;background:${rangeCol};"></div>
+            </div>
+            <span class="mc-vix-scale-label">${fmtPt(nifty.fiftyTwoWeekLow)} ── 52W ── ${fmtPt(nifty.fiftyTwoWeekHigh)}</span>
+        </div>` : '<div class="mc-na" style="margin-bottom:0.75rem;">NIFTY data unavailable</div>'}
+        <div class="mc-positioning-rows" style="margin-top:0.85rem;">
+            ${indices.map(({label, q}) => q ? `
+            <div class="mc-pos-row">
+                <span class="mc-pos-label">${label}</span>
+                <span class="mc-pos-ytd">${fmtPct(q.ytdChange)} YTD</span>
+                <span class="mc-pos-chg">${fmtPct(q.percentChange)} today</span>
+            </div>` : '').join('')}
+        </div>
+    </div>`;
+}
+
+function renderVixPcrSection(vix, pcr, nifty, bank, it) {
+    const vixVal     = vix ? vix.currentPrice : null;
+    const vixChg     = vix ? vix.change : 0;
+    const vixPct     = vix ? vix.percentChange : 0;
+    const vixSign    = vixChg >= 0 ? '+' : '';
+    const vixCls     = vixChg >= 0 ? 'val-red' : 'val-green'; // rising VIX = bad
+    const vixCol     = vixVal ? vixColor(vixVal) : 'var(--text-secondary)';
+
+    return `
+    <div class="mc-section">
+        <div class="mc-section-title">Volatility &amp; Sentiment</div>
+        <div class="mc-cards-row">
+            <div class="mc-metric-card">
+                <div class="mc-metric-label">India VIX</div>
+                <div class="mc-metric-value" style="color:${vixCol}">
+                    ${vixVal !== null ? vixVal.toFixed(2) : '<span class="mc-na">Unavailable</span>'}
+                </div>
+                ${vixVal !== null ? `
+                <div class="mc-metric-change ${vixCls}">${vixSign}${vixChg.toFixed(2)} (${vixSign}${vixPct.toFixed(2)}%)</div>
+                <div class="mc-metric-sub" style="color:${vixCol}">${vixLabel(vixVal)}</div>
+                <div class="mc-vix-bar-wrap">
+                    <div class="mc-vix-bar">
+                        <div class="mc-vix-bar-fill" style="width:${Math.min(vixVal / 40 * 100, 100).toFixed(1)}%;background:${vixCol};"></div>
+                    </div>
+                    <span class="mc-vix-scale-label">0 ──── 20 ──── 40</span>
+                </div>` : ''}
+            </div>
+
+            ${pcr ? renderPcrCard(pcr) : renderNiftyPositioningCard(nifty, bank, it)}
+        </div>
+    </div>`;
+}
+
+function renderRbiSection(rbi) {
+    if (!rbi) return `<div class="mc-section"><div class="mc-section-title">RBI Policy Rates</div><p class="mc-na" style="padding:1rem;">Unavailable</p></div>`;
+    const rates = [
+        { label: 'Repo Rate',         value: rbi.repoRate,        desc: 'Benchmark lending rate' },
+        { label: 'Reverse Repo',      value: rbi.reverseRepoRate, desc: 'Overnight deposit rate' },
+        { label: 'CRR',               value: rbi.crr,             desc: 'Cash reserve ratio' },
+        { label: 'SLR',               value: rbi.slr,             desc: 'Statutory liquidity ratio' },
+        { label: 'MSF / Bank Rate',   value: rbi.msfRate,         desc: 'Marginal standing facility' },
+    ];
+    return `
+    <div class="mc-section">
+        <div class="mc-section-title">RBI Policy Rates <span class="mc-asof">As of ${rbi.asOf}</span></div>
+        <div class="mc-rbi-cards">
+            ${rates.map(r => `
+            <div class="mc-rbi-card">
+                <div class="mc-rbi-label">${r.label}</div>
+                <div class="mc-rbi-value">${r.value.toFixed(2)}%</div>
+                <div class="mc-rbi-desc">${r.desc}</div>
+            </div>`).join('')}
+        </div>
+    </div>`;
+}
+
+function renderFiiDiiSection(data) {
+    if (!data) return `<div class="mc-section"><div class="mc-section-title">FII / DII Flows</div><p class="mc-na" style="padding:1rem;">Unavailable — NSE data could not be fetched</p></div>`;
+
+    const fmtCr = v => {
+        const abs = Math.abs(v);
+        const s   = v < 0 ? '-' : '+';
+        return `${s}₹${abs.toLocaleString('en-IN', {maximumFractionDigits: 0})} Cr`;
+    };
+    const barWidth = (net, max) => Math.min(Math.abs(net) / max * 100, 100).toFixed(1);
+
+    const fii = data.fii || { buy: 0, sell: 0, net: 0 };
+    const dii = data.dii || { buy: 0, sell: 0, net: 0 };
+    const max = Math.max(Math.abs(fii.net), Math.abs(dii.net), 1000);
+
+    const row = (label, d) => {
+        const netCol  = d.net >= 0 ? '#10b981' : '#ef4444';
+        const barCol  = d.net >= 0 ? '#10b981' : '#ef4444';
+        const barDir  = d.net >= 0 ? 'right' : 'left';
+        return `
+        <div class="mc-flow-row">
+            <div class="mc-flow-label">${label}</div>
+            <div class="mc-flow-nums">
+                <span class="mc-flow-num-item">Buy <strong>₹${d.buy.toLocaleString('en-IN',{maximumFractionDigits:0})} Cr</strong></span>
+                <span class="mc-flow-num-item">Sell <strong>₹${d.sell.toLocaleString('en-IN',{maximumFractionDigits:0})} Cr</strong></span>
+                <span class="mc-flow-net" style="color:${netCol}">${fmtCr(d.net)}</span>
+            </div>
+            <div class="mc-flow-bar-wrap">
+                <div class="mc-flow-bar-track">
+                    <div class="mc-flow-bar-center"></div>
+                    <div class="mc-flow-bar-fill" style="
+                        width:${barWidth(d.net, max)}%;
+                        background:${barCol};
+                        ${barDir === 'right' ? 'left:50%' : 'right:50%'};
+                    "></div>
+                </div>
+            </div>
+        </div>`;
+    };
+
+    return `
+    <div class="mc-section">
+        <div class="mc-section-title">
+            FII / DII Flows — Cash Segment
+            <span class="mc-asof">${data.date || ''}</span>
+        </div>
+        <div class="mc-flows">
+            ${row('FII / FPI', fii)}
+            ${row('DII', dii)}
+        </div>
+        <p class="mc-source-note">Source: NSE India · Cash segment only</p>
+    </div>`;
+}
+
 function formatVal(val, currency = 'INR') {
     const locale = currency === 'INR' ? 'en-IN' : 'en-US';
     const formatter = new Intl.NumberFormat(locale, {
@@ -809,6 +1048,21 @@ function getColorClass(val) {
 async function fetchQuotes() {
     const portfolioEl = document.getElementById('portfolio-content');
     const tableContainerEl = document.querySelector('.table-container');
+
+    const mcEl = document.getElementById('market-context-content');
+
+    if (activeMainTab === 'Market Context') {
+        tableContainerEl.style.display = 'none';
+        portfolioEl.style.display = 'none';
+        mcEl.style.display = 'block';
+        document.getElementById('overview-extras').classList.remove('active');
+        loadingOverlay.classList.remove('active');
+        mfControls.style.display = 'none';
+        renderMarketContext();
+        return;
+    }
+
+    mcEl.style.display = 'none';
 
     if (activeMainTab === 'Portfolio') {
         tableContainerEl.style.display = 'none';
