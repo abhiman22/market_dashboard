@@ -127,7 +127,7 @@ function saveState() {
 function renderTabs() {
     // Render Main Tabs
     mainTabsContainer.innerHTML = '';
-    Object.keys(appState).filter(t => t !== 'Portfolio').forEach(mainTab => {
+    Object.keys(appState).forEach(mainTab => {
         const btn = document.createElement('button');
         btn.className = `main-tab-btn ${mainTab === activeMainTab ? 'active' : ''}`;
         btn.textContent = mainTab;
@@ -196,24 +196,220 @@ function renderTabs() {
 // Portfolio Tab (CAS Import)
 // =============================================================================
 let casData = null;
+let portfolioCharts = [];
+
+// Demo data — real fund/stock names, values scaled to <₹10k each for testing
+const PORTFOLIO_DEMO_DATA = {
+    investor: "DEMO INVESTOR", pan: "XXXXX****X", casId: "XXXXXXXXXX",
+    period: "01-Feb-2026 to 28-Feb-2026",
+    mfFolios: [
+        { scheme: "ABSL Corporate Bond Fund - Direct Growth",            amc: "Aditya Birla Sun Life", category: "Debt",            units: 15.590, nav: 118.91, invested: 1000, value: 1854 },
+        { scheme: "ABSL Flexi Cap Fund - Direct Growth",                 amc: "Aditya Birla Sun Life", category: "Flexi Cap",        units:  0.853, nav: 2076.86,invested:  630, value: 1772 },
+        { scheme: "ABSL Large & Mid Cap Fund - Direct Growth",           amc: "Aditya Birla Sun Life", category: "Large & Mid Cap",  units:  0.083, nav: 1022.35,invested:   30, value:   85 },
+        { scheme: "Axis Large Cap Fund - Direct Growth",                 amc: "Axis",                  category: "Large Cap",        units: 43.801, nav:  70.07, invested: 2500, value: 3069 },
+        { scheme: "Axis Mid Cap Fund - Direct Growth",                   amc: "Axis",                  category: "Mid Cap",          units: 26.163, nav: 133.22, invested: 2750, value: 3485 },
+        { scheme: "Axis Small Cap Fund - Direct Growth",                 amc: "Axis",                  category: "Small Cap",        units: 52.064, nav: 118.52, invested: 5350, value: 6171 },
+        { scheme: "ICICI Pru BSE Sensex Index Fund - Direct Growth",     amc: "ICICI Prudential",      category: "Large Cap",        units:302.153, nav:  26.98, invested: 6200, value: 8151 },
+        { scheme: "ICICI Pru Banking & PSU Debt Fund - Direct Growth",   amc: "ICICI Prudential",      category: "Debt",             units: 65.449, nav:  35.50, invested: 1250, value: 2324 },
+        { scheme: "ICICI Pru Energy Opportunities Fund - Direct Growth", amc: "ICICI Prudential",      category: "Thematic",         units: 24.999, nav:  11.21, invested:  250, value:  280 },
+        { scheme: "ICICI Pru Gold ETF FoF - Direct Growth",             amc: "ICICI Prudential",      category: "Gold",             units: 29.242, nav:  50.86, invested:  600, value: 1487 },
+        { scheme: "ICICI Pru NASDAQ 100 Index Fund - Direct Growth",     amc: "ICICI Prudential",      category: "International",    units: 12.481, nav:  19.76, invested:  100, value:  247 },
+        { scheme: "ICICI Pru Nifty IT Index Fund - Direct Growth",       amc: "ICICI Prudential",      category: "Thematic",         units:179.609, nav:  10.80, invested: 1900, value: 1940 },
+        { scheme: "ICICI Pru Nifty Next 50 Index Fund - Direct Growth",  amc: "ICICI Prudential",      category: "Mid Cap",          units: 47.622, nav:  64.66, invested: 2900, value: 3079 },
+        { scheme: "Mirae Asset Aggressive Hybrid Fund - Direct Plan",    amc: "Mirae Asset",           category: "Hybrid",           units:  3.393, nav:  39.21, invested:   50, value:  133 },
+        { scheme: "Mirae Asset ELSS Tax Saver Fund - Direct Plan",       amc: "Mirae Asset",           category: "ELSS",             units: 47.466, nav:  56.49, invested: 1750, value: 2681 },
+        { scheme: "Mirae Asset Focused Fund - Direct Plan",              amc: "Mirae Asset",           category: "Flexi Cap",        units: 88.958, nav:  26.23, invested: 2100, value: 2334 },
+        { scheme: "Mirae Asset Large Cap Fund - Direct Plan",            amc: "Mirae Asset",           category: "Large Cap",        units:  7.704, nav: 128.43, invested:  560, value:  989 },
+        { scheme: "Mirae Asset Large & Midcap Fund - Direct Plan",       amc: "Mirae Asset",           category: "Large & Mid Cap",  units:  9.954, nav: 174.06, invested: 1250, value: 1733 },
+        { scheme: "Mirae Asset Nifty MidSmallcap400 MQ 100 ETF FoF",    amc: "Mirae Asset",           category: "Mid & Small Cap",  units:202.683, nav:   9.51, invested: 2000, value: 1928 },
+        { scheme: "Mirae Asset S&P 500 Top 50 ETF FoF - Direct Plan",   amc: "Mirae Asset",           category: "International",    units: 26.249, nav:  25.10, invested:  300, value:  659 },
+        { scheme: "Parag Parikh Flexi Cap Fund - Direct Growth",         amc: "PPFAS",                 category: "Flexi Cap",        units:105.386, nav:  91.95, invested: 8400, value: 9691 },
+        { scheme: "SBI Large Cap Fund - Direct Growth",                  amc: "SBI",                   category: "Large Cap",        units: 26.781, nav: 105.57, invested:  920, value: 2827 },
+        { scheme: "UTI Large Cap Fund - Direct Plan",                    amc: "UTI",                   category: "Large Cap",        units:  3.135, nav: 299.05, invested:  674, value:  937 },
+        { scheme: "UTI Flexi Cap Fund - Direct Plan (Folio 1)",          amc: "UTI",                   category: "Flexi Cap",        units: 10.021, nav: 322.33, invested: 1000, value: 3230 },
+        { scheme: "UTI Flexi Cap Fund - Direct Plan (Folio 2)",          amc: "UTI",                   category: "Flexi Cap",        units:  8.713, nav: 322.33, invested: 2500, value: 2809 },
+        { scheme: "UTI MNC Fund - Direct Plan",                          amc: "UTI",                   category: "Thematic",         units:  2.084, nav: 434.65, invested:  320, value:  906 }
+    ],
+    dematMF: [
+        { scheme: "HDFC Mid Cap Fund - Direct Growth",           amc: "HDFC",           category: "Mid Cap",    isin: "INF179K01XQ0", units: 20.02, price: 223.96, value: 4484 },
+        { scheme: "Quant Mid Cap Fund - Direct Growth",          amc: "Quant",          category: "Mid Cap",    isin: "INF966L01887", units: 10.24, price: 221.21, value: 2266 },
+        { scheme: "Quant Small Cap Fund - Direct Growth",        amc: "Quant",          category: "Small Cap",  isin: "INF966L01689", units: 19.37, price: 258.43, value: 5005 },
+        { scheme: "Groww Nifty EV & New Age Auto ETF",           amc: "Groww AM",       category: "Thematic",   isin: "INF666M01IH2", units:  7.77, price:  30.88, value:  240 },
+        { scheme: "ICICI Pru Nifty Next 50 ETF",                 amc: "ICICI Prudential",category: "Mid Cap",   isin: "INF109KC1NS5", units:  4.00, price:  73.42, value:  294 },
+        { scheme: "ICICI Pru Gold ETF",                          amc: "ICICI Prudential",category: "Gold",      isin: "INF109KC1NT3", units:  5.00, price: 136.28, value:  681 },
+        { scheme: "Nippon India ETF Nifty Bank BeES",            amc: "Nippon",         category: "Thematic",   isin: "INF204KB15I9", units:  0.22, price: 623.38, value:  137 },
+        { scheme: "Nippon India ETF Nifty IT",                   amc: "Nippon",         category: "Thematic",   isin: "INF204KB15V2", units:  6.06, price:  33.81, value:  205 }
+    ],
+    equity: [
+        { name: "Aadhar Housing Finance",      isin: "INE883F01010", qty:   4, price:  460.35, value: 1841 },
+        { name: "Avenue Supermarts (DMart)",   isin: "INE192R01011", qty:   1, price: 3845.50, value: 3846 },
+        { name: "Bajaj Finance",               isin: "INE296A01032", qty:   5, price:  996.50, value: 4983 },
+        { name: "Bajaj Housing Finance",       isin: "INE377Y01014", qty:  21, price:   87.03, value: 1828 },
+        { name: "Bank of Baroda",              isin: "INE028A01039", qty:   4, price:  321.85, value: 1287 },
+        { name: "Bansal Wire Industries",      isin: "INE0B9K01025", qty:   5, price:  262.50, value: 1313 },
+        { name: "Emcure Pharmaceuticals",      isin: "INE168P01015", qty:   1, price: 1454.55, value: 1455 },
+        { name: "HDFC Bank",                   isin: "INE040A01034", qty:  10, price:  887.40, value: 8874 },
+        { name: "Hindustan Zinc",              isin: "INE267A01025", qty:   2, price:  603.85, value: 1208 },
+        { name: "Infosys",                     isin: "INE009A01021", qty:   4, price: 1299.95, value: 5200 },
+        { name: "INOX India",                  isin: "INE616N01034", qty:   2, price: 1163.70, value: 2327 },
+        { name: "IRCTC",                       isin: "INE335Y01020", qty:   7, price:  571.25, value: 3999 },
+        { name: "ITC Hotels",                  isin: "INE379A01028", qty:   5, price:  176.15, value:  881 },
+        { name: "ITC",                         isin: "INE154A01025", qty:   5, price:  313.60, value: 1568 },
+        { name: "Jio Financial Services",      isin: "INE758E01017", qty:  11, price:  255.35, value: 2809 },
+        { name: "JSW Infrastructure",          isin: "INE880J01026", qty:  12, price:  254.85, value: 3058 },
+        { name: "LIC",                         isin: "INE0J1Y01017", qty:   1, price:  849.35, value:  849 },
+        { name: "NTPC",                        isin: "INE733E01010", qty:   7, price:  381.85, value: 2673 },
+        { name: "Power Finance Corporation",   isin: "INE134E01011", qty:   2, price:  412.75, value:  826 },
+        { name: "Power Grid Corporation",      isin: "INE752E01010", qty:   4, price:  298.75, value: 1195 },
+        { name: "Protean eGov Technologies",   isin: "INE004A01022", qty:   1, price:  590.20, value:  590 },
+        { name: "Reliance Industries",         isin: "INE002A01018", qty:   6, price: 1394.30, value: 8366 },
+        { name: "State Bank of India",         isin: "INE062A01020", qty:   5, price: 1202.00, value: 6010 },
+        { name: "Suzlon Energy",               isin: "INE040H01021", qty: 200, price:   42.70, value: 8540 },
+        { name: "Tata Motors",                 isin: "INE1TAE01010", qty:   5, price:  504.90, value: 2525 }
+    ]
+};
 
 function renderPortfolioUpload() {
     document.getElementById('portfolio-content').innerHTML = `
         <div class="portfolio-upload-card">
             <div class="portfolio-upload-icon">📄</div>
             <h3>Import CAS Statement</h3>
-            <p class="portfolio-upload-hint">Upload your Consolidated Account Statement PDF from CAMS or KFintech.<br>The password is usually your PAN in uppercase.</p>
+            <p class="portfolio-upload-hint">Upload your Consolidated Account Statement PDF from CDSL/CAMS/KFintech.<br>Password is usually your PAN in uppercase.</p>
             <div class="portfolio-upload-form">
                 <label class="portfolio-file-label" for="cas-file-input">
                     <span id="cas-file-name">Choose PDF file…</span>
                 </label>
                 <input type="file" id="cas-file-input" accept=".pdf" style="display:none" onchange="document.getElementById('cas-file-name').textContent = this.files[0]?.name || 'Choose PDF file…'">
-                <input type="password" id="cas-password" class="glass-input" placeholder="PDF Password (usually your PAN)" style="width:100%; box-sizing:border-box;">
+                <input type="password" id="cas-password" class="glass-input" placeholder="PDF Password (your PAN)" style="width:100%; box-sizing:border-box;">
                 <button class="glass-btn portfolio-upload-btn" onclick="uploadCAS()">Parse Statement</button>
             </div>
-            <p class="portfolio-setup-hint">Prerequisite: <code>pip install casparser</code></p>
+            <div class="portfolio-upload-divider"><span>or</span></div>
+            <button class="glass-btn portfolio-upload-btn portfolio-demo-btn" onclick="loadDemoPortfolio()">Load Demo Portfolio</button>
+            <p class="portfolio-setup-hint" style="margin-top:0.75rem;">Demo uses real fund/stock names with test values</p>
         </div>
     `;
+}
+
+// ── CAS response adapter ──────────────────────────────────────────────────────
+// Converts the backend CASParser JSON shape → the shape renderPortfolioData expects.
+
+function inferFundCategory(name) {
+    const n = name.toLowerCase();
+    if (n.includes('overnight'))                                    return 'Overnight';
+    if (n.includes('liquid'))                                       return 'Liquid';
+    if (n.includes('money market'))                                 return 'Money Market';
+    if (n.includes('ultra short'))                                  return 'Ultra Short Duration';
+    if (n.includes('low duration'))                                 return 'Low Duration';
+    if (n.includes('short duration'))                               return 'Short Duration';
+    if (n.includes('medium duration') || n.includes('medium term')) return 'Medium Duration';
+    if (n.includes('long duration'))                                return 'Long Duration';
+    if (n.includes('dynamic bond'))                                 return 'Dynamic Bond';
+    if (n.includes('corporate bond'))                               return 'Corporate Bond';
+    if (n.includes('credit risk'))                                  return 'Credit Risk';
+    if (n.includes('banking & psu') || n.includes('banking and psu')) return 'Banking & PSU';
+    if (n.includes('gilt'))                                         return 'Gilt';
+    if (n.includes('floater'))                                      return 'Floater';
+    if (n.includes('elss') || n.includes('tax saver') || n.includes('tax saving')) return 'ELSS';
+    if (n.includes('large & mid') || n.includes('large and mid'))   return 'Large & Mid Cap';
+    if (n.includes('large cap'))                                    return 'Large Cap';
+    if (n.includes('mid cap'))                                      return 'Mid Cap';
+    if (n.includes('small cap'))                                    return 'Small Cap';
+    if (n.includes('flexi cap'))                                    return 'Flexi Cap';
+    if (n.includes('multi cap'))                                    return 'Multi Cap';
+    if (n.includes('focused'))                                      return 'Focused';
+    if (n.includes('dividend yield'))                               return 'Dividend Yield';
+    if (n.includes('value') || n.includes('contra'))                return 'Value/Contra';
+    if (n.includes('arbitrage'))                                    return 'Arbitrage';
+    if (n.includes('equity savings'))                               return 'Equity Savings';
+    if (n.includes('aggressive hybrid'))                            return 'Aggressive Hybrid';
+    if (n.includes('conservative hybrid'))                          return 'Conservative Hybrid';
+    if (n.includes('balanced advantage') || n.includes('dynamic asset')) return 'Balanced Advantage';
+    if (n.includes('hybrid') || n.includes('balanced'))             return 'Hybrid';
+    if (n.includes('index') || n.includes('nifty') || n.includes('sensex') || n.includes('etf')) return 'Index/ETF';
+    if (n.includes('international') || n.includes('overseas') || n.includes('global') || n.includes('nasdaq') || n.includes(' us ')) return 'International';
+    if (n.includes('pharma') || n.includes('infra') || n.includes('consumption') || n.includes('thematic') || n.includes('sectoral')) return 'Sectoral/Thematic';
+    if (n.includes('fof') || n.includes('fund of fund'))            return 'FoF';
+    return 'Equity';
+}
+
+function inferAMC(name) {
+    const n = name.toLowerCase();
+    if (n.includes('hdfc'))                                   return 'HDFC Mutual Fund';
+    if (n.includes('sbi'))                                    return 'SBI Mutual Fund';
+    if (n.includes('icici'))                                  return 'ICICI Prudential';
+    if (n.includes('axis'))                                   return 'Axis Mutual Fund';
+    if (n.includes('kotak'))                                  return 'Kotak Mutual Fund';
+    if (n.includes('nippon'))                                 return 'Nippon India';
+    if (n.includes('mirae'))                                  return 'Mirae Asset';
+    if (n.includes('parag parikh') || n.includes('ppfas'))    return 'PPFAS';
+    if (n.includes('dsp'))                                    return 'DSP Mutual Fund';
+    if (n.includes('franklin'))                               return 'Franklin Templeton';
+    if (n.includes('tata'))                                   return 'Tata Mutual Fund';
+    if (n.includes('uti'))                                    return 'UTI Mutual Fund';
+    if (n.includes('aditya') || n.includes('absl') || n.includes('birla')) return 'Aditya Birla Sun Life';
+    if (n.includes('invesco'))                                return 'Invesco';
+    if (n.includes('sundaram'))                               return 'Sundaram';
+    if (n.includes('canara'))                                 return 'Canara Robeco';
+    if (n.includes('idfc') || n.includes('bandhan'))          return 'Bandhan';
+    if (n.includes('whiteoak'))                               return 'WhiteOak Capital';
+    if (n.includes('motilal'))                                return 'Motilal Oswal';
+    if (n.includes('pgim'))                                   return 'PGIM India';
+    if (n.includes('quant'))                                  return 'Quant';
+    if (n.includes('groww'))                                  return 'Groww';
+    return 'Other';
+}
+
+function normalizeCASResponse(raw) {
+    // raw = CASParser output: { investor, summary, monthlyHistory, mfHoldings, activeSips, dematHoldings }
+    const inv = raw.investor || {};
+
+    const mfFolios = (raw.mfHoldings || []).map(h => ({
+        scheme:   h.name,
+        amc:      h.amc || inferAMC(h.name),
+        category: inferFundCategory(h.name),
+        units:    h.units,
+        nav:      h.nav,
+        invested: h.invested,
+        value:    h.value,
+    }));
+
+    const dematAll = raw.dematHoldings || [];
+    const dematMF = dematAll
+        .filter(h => h.type === 'MF-Demat')
+        .map(h => ({
+            scheme:   h.name,
+            amc:      inferAMC(h.name),
+            category: inferFundCategory(h.name),
+            units:    h.qty,
+            price:    h.price,
+            value:    h.value,
+        }));
+
+    const equity = dematAll
+        .filter(h => h.type === 'Equity')
+        .map(h => ({
+            name:  h.name,
+            qty:   h.qty,
+            price: h.price,
+            value: h.value,
+        }));
+
+    const periodFrom = inv.periodFrom || '';
+    const periodTo   = inv.periodTo   || '';
+    const period = (periodFrom && periodTo) ? `${periodFrom} to ${periodTo}` : (periodFrom || '');
+
+    return {
+        investor: inv.name || 'My Portfolio',
+        period,
+        mfFolios,
+        dematMF,
+        equity,
+    };
+}
+
+function loadDemoPortfolio() {
+    casData = PORTFOLIO_DEMO_DATA;
+    renderPortfolioData(casData);
 }
 
 async function uploadCAS() {
@@ -237,8 +433,8 @@ async function uploadCAS() {
             });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
-            casData = data;
-            renderPortfolioData(data);
+            casData = normalizeCASResponse(data);
+            renderPortfolioData(casData);
         } catch (err) {
             document.getElementById('portfolio-content').innerHTML = `
                 <div class="portfolio-upload-card">
@@ -251,13 +447,303 @@ async function uploadCAS() {
 }
 
 function renderPortfolioData(data) {
-    const investor = data.investor_info || {};
-    const period   = data.statement_period || {};
-    const folios   = data.folios || [];
+    // Legacy casparser format fallback
+    if (!data.mfFolios) { renderPortfolioLegacy(data); return; }
 
+    portfolioCharts.forEach(c => c.destroy());
+    portfolioCharts = [];
+
+    const fmtINR = n => '₹' + Math.round(n).toLocaleString('en-IN');
+
+    const mfValue    = data.mfFolios.reduce((s, f) => s + f.value, 0);
+    const mfInvested = data.mfFolios.reduce((s, f) => s + f.invested, 0);
+    const dematValue = data.dematMF.reduce((s, f) => s + f.value, 0);
+    const eqValue    = data.equity.reduce((s, e) => s + e.value, 0);
+    const total      = mfValue + dematValue + eqValue;
+    const gain       = mfValue - mfInvested;
+    const gainPct    = mfInvested > 0 ? (gain / mfInvested) * 100 : 0;
+    const gc         = gain >= 0 ? 'val-green' : 'val-red';
+    const sign       = gain >= 0 ? '+' : '';
+
+    // Category & AMC aggregation
+    const catMap = {}, amcMap = {};
+    [...data.mfFolios, ...data.dematMF].forEach(f => {
+        catMap[f.category] = (catMap[f.category] || 0) + f.value;
+        amcMap[f.amc]      = (amcMap[f.amc]      || 0) + f.value;
+    });
+    const catEntries = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
+    const amcEntries = Object.entries(amcMap).sort((a, b) => b[1] - a[1]);
+
+    const warnings = computePortfolioWarnings(data);
+
+    const pct = (v) => ((v / total) * 100).toFixed(1);
+
+    const mfRows = [...data.mfFolios].sort((a, b) => b.value - a.value).map(f => {
+        const g = f.value - f.invested;
+        const gPct = f.invested > 0 ? (g / f.invested) * 100 : 0;
+        const hgc = g >= 0 ? 'val-green' : 'val-red';
+        const hs  = g >= 0 ? '+' : '';
+        return `<tr>
+            <td class="portfolio-scheme-name">
+                <div>${f.scheme}</div>
+                <div class="portfolio-scheme-cat">${f.category}</div>
+            </td>
+            <td class="hide-mobile" style="color:var(--text-secondary);font-size:0.78rem;white-space:nowrap;">${f.amc}</td>
+            <td class="right-align hide-mobile" style="font-size:0.82rem;font-variant-numeric:tabular-nums;">${f.units.toLocaleString('en-IN',{maximumFractionDigits:3})}</td>
+            <td class="right-align hide-mobile">₹${f.nav.toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+            <td class="right-align" style="font-weight:600;">${fmtINR(f.value)}</td>
+            <td class="right-align ${hgc}">${hs}${gPct.toFixed(1)}%</td>
+        </tr>`;
+    }).join('');
+
+    const dematRows = [...data.dematMF].sort((a, b) => b.value - a.value).map(f => `<tr>
+        <td class="portfolio-scheme-name">${f.scheme}</td>
+        <td class="hide-mobile" style="color:var(--text-secondary);font-size:0.78rem;">${f.amc}</td>
+        <td class="right-align hide-mobile" style="font-size:0.82rem;">${f.units.toLocaleString('en-IN',{maximumFractionDigits:3})}</td>
+        <td class="right-align hide-mobile">₹${f.price.toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+        <td class="right-align" style="font-weight:600;">${fmtINR(f.value)}</td>
+        <td class="hide-mobile"><span class="portfolio-cat-badge">${f.category}</span></td>
+    </tr>`).join('');
+
+    const eqRows = [...data.equity].sort((a, b) => b.value - a.value).map(e => `<tr>
+        <td style="font-weight:600;font-size:0.88rem;">${e.name}</td>
+        <td class="right-align hide-mobile" style="font-size:0.82rem;">${e.qty}</td>
+        <td class="right-align hide-mobile">₹${e.price.toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+        <td class="right-align" style="font-weight:600;">${fmtINR(e.value)}</td>
+    </tr>`).join('');
+
+    document.getElementById('portfolio-content').innerHTML = `
+        <div class="portfolio-header">
+            <div>
+                <div class="portfolio-investor-name">${data.investor}</div>
+                <div class="portfolio-period">${data.period}</div>
+            </div>
+            <button class="glass-btn" style="font-size:0.75rem;" onclick="casData=null; renderPortfolioUpload()">↑ Upload New</button>
+        </div>
+
+        <div class="portfolio-summary-cards">
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">Total Portfolio</div>
+                <div class="portfolio-summary-value">${fmtINR(total)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">MF Invested</div>
+                <div class="portfolio-summary-value">${fmtINR(mfInvested)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">MF Gain / Loss</div>
+                <div class="portfolio-summary-value ${gc}">${sign}${fmtINR(gain)}</div>
+            </div>
+            <div class="portfolio-summary-card">
+                <div class="portfolio-summary-label">MF Return</div>
+                <div class="portfolio-summary-value ${gc}">${sign}${gainPct.toFixed(1)}%</div>
+            </div>
+        </div>
+
+        <div class="portfolio-asset-bar-section">
+            <div class="portfolio-asset-labels">
+                <span class="portfolio-asset-label"><span class="portfolio-asset-dot" style="background:#3b82f6"></span>MF Folios &nbsp;${fmtINR(mfValue)} (${pct(mfValue)}%)</span>
+                <span class="portfolio-asset-label"><span class="portfolio-asset-dot" style="background:#8b5cf6"></span>Demat MF/ETF &nbsp;${fmtINR(dematValue)} (${pct(dematValue)}%)</span>
+                <span class="portfolio-asset-label"><span class="portfolio-asset-dot" style="background:#10b981"></span>Direct Equity &nbsp;${fmtINR(eqValue)} (${pct(eqValue)}%)</span>
+            </div>
+            <div class="portfolio-asset-bar">
+                <div style="width:${pct(mfValue)}%;background:#3b82f6;border-radius:4px 0 0 4px;"></div>
+                <div style="width:${pct(dematValue)}%;background:#8b5cf6;"></div>
+                <div style="width:${pct(eqValue)}%;background:#10b981;border-radius:0 4px 4px 0;"></div>
+            </div>
+        </div>
+
+        <div class="portfolio-charts-row">
+            <div class="portfolio-chart-card">
+                <div class="portfolio-chart-title">Category Allocation</div>
+                <div class="portfolio-chart-wrap"><canvas id="portfolio-category-chart"></canvas></div>
+            </div>
+            <div class="portfolio-chart-card">
+                <div class="portfolio-chart-title">AMC Distribution</div>
+                <div class="portfolio-chart-wrap"><canvas id="portfolio-amc-chart"></canvas></div>
+            </div>
+        </div>
+
+        ${warnings.length ? `<div class="portfolio-observations">
+            <div class="portfolio-section-title">Observations</div>
+            ${warnings.map(w => `<div class="portfolio-obs-item portfolio-obs-${w.type}">${w.text}</div>`).join('')}
+        </div>` : ''}
+
+        <div class="portfolio-section collapsible-section">
+            <div class="collapsible-header portfolio-section-header" onclick="toggleSection('pf-mf-folios')">
+                <div class="portfolio-section-title">Mutual Fund Folios <span class="portfolio-section-count">${data.mfFolios.length} schemes</span></div>
+                <span class="chevron" id="chevron-pf-mf-folios">▾</span>
+            </div>
+            <div class="collapsible-body" id="pf-mf-folios">
+                <div class="portfolio-table-wrapper">
+                    <table class="market-table">
+                        <thead><tr>
+                            <th>Scheme</th>
+                            <th class="hide-mobile">AMC</th>
+                            <th class="right-align hide-mobile">Units</th>
+                            <th class="right-align hide-mobile">NAV</th>
+                            <th class="right-align">Value</th>
+                            <th class="right-align">Return</th>
+                        </tr></thead>
+                        <tbody>${mfRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="portfolio-section collapsible-section">
+            <div class="collapsible-header portfolio-section-header" onclick="toggleSection('pf-demat')">
+                <div class="portfolio-section-title">MF / ETF Units in Demat <span class="portfolio-section-count">${data.dematMF.length} holdings</span></div>
+                <span class="chevron" id="chevron-pf-demat">▾</span>
+            </div>
+            <div class="collapsible-body" id="pf-demat">
+                <div class="portfolio-table-wrapper">
+                    <table class="market-table">
+                        <thead><tr>
+                            <th>Scheme</th>
+                            <th class="hide-mobile">AMC</th>
+                            <th class="right-align hide-mobile">Units</th>
+                            <th class="right-align hide-mobile">Price</th>
+                            <th class="right-align">Value</th>
+                            <th class="hide-mobile">Category</th>
+                        </tr></thead>
+                        <tbody>${dematRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="portfolio-section collapsible-section">
+            <div class="collapsible-header portfolio-section-header" onclick="toggleSection('pf-equity')">
+                <div class="portfolio-section-title">Direct Equity <span class="portfolio-section-count">${data.equity.length} stocks</span></div>
+                <span class="chevron" id="chevron-pf-equity">▾</span>
+            </div>
+            <div class="collapsible-body" id="pf-equity">
+                <div class="portfolio-chart-card" style="margin-bottom:1rem;">
+                    <div class="portfolio-chart-title">Stock Allocation</div>
+                    <div class="portfolio-chart-wrap portfolio-equity-chart-wrap"><canvas id="portfolio-equity-chart"></canvas></div>
+                </div>
+                <div class="portfolio-table-wrapper">
+                    <table class="market-table">
+                        <thead><tr>
+                            <th>Stock</th>
+                            <th class="right-align hide-mobile">Qty</th>
+                            <th class="right-align hide-mobile">Price</th>
+                            <th class="right-align">Value</th>
+                        </tr></thead>
+                        <tbody>${eqRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    setTimeout(() => renderPortfolioCharts(catEntries, amcEntries, data.equity), 0);
+}
+
+function computePortfolioWarnings(data) {
+    const w = [];
+    const flexiFunds = data.mfFolios.filter(f => f.category === 'Flexi Cap');
+    if (flexiFunds.length >= 3)
+        w.push({ type: 'warn', text: `⚠ ${flexiFunds.length} Flexi Cap funds — high overlap. Consider consolidating to 1–2 funds.` });
+
+    const lcFunds = [...data.mfFolios, ...data.dematMF].filter(f => f.category === 'Large Cap');
+    if (lcFunds.length >= 4)
+        w.push({ type: 'warn', text: `⚠ ${lcFunds.length} Large Cap funds — a single index fund can replace most of these.` });
+
+    const schemeCount = {};
+    data.mfFolios.forEach(f => {
+        const key = f.scheme.replace(/\s*\(Folio \d+\)\s*/, '').trim();
+        schemeCount[key] = (schemeCount[key] || 0) + 1;
+    });
+    Object.entries(schemeCount).forEach(([name, count]) => {
+        if (count > 1) w.push({ type: 'info', text: `ℹ "${name}" is split across ${count} folios — can be consolidated into one.` });
+    });
+
+    const negFunds = data.mfFolios.filter(f => f.value < f.invested);
+    if (negFunds.length)
+        w.push({ type: 'info', text: `ℹ ${negFunds.length} fund${negFunds.length > 1 ? 's' : ''} in negative: ${negFunds.map(f => f.scheme.split(' ').slice(0,3).join(' ')).join(', ')}.` });
+
+    return w;
+}
+
+function renderPortfolioCharts(catEntries, amcEntries, equity) {
+    const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316','#84cc16','#6366f1','#a78bfa','#34d399'];
+    const catTotal = catEntries.reduce((s, [,v]) => s + v, 0);
+
+    const dpr = window.devicePixelRatio || 2;
+
+    const catCanvas = document.getElementById('portfolio-category-chart');
+    if (catCanvas) {
+        portfolioCharts.push(new Chart(catCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: catEntries.map(([k]) => k),
+                datasets: [{ data: catEntries.map(([,v]) => v), backgroundColor: COLORS, borderWidth: 0, hoverOffset: 6 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                devicePixelRatio: dpr,
+                cutout: '62%',
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11, family: 'Inter' }, boxWidth: 11, padding: 10 } },
+                    tooltip: { callbacks: { label: ctx => ` ₹${Math.round(ctx.raw).toLocaleString('en-IN')} (${((ctx.raw/catTotal)*100).toFixed(1)}%)` } }
+                }
+            }
+        }));
+    }
+
+    const amcCanvas = document.getElementById('portfolio-amc-chart');
+    if (amcCanvas) {
+        portfolioCharts.push(new Chart(amcCanvas, {
+            type: 'bar',
+            data: {
+                labels: amcEntries.map(([k]) => k),
+                datasets: [{ data: amcEntries.map(([,v]) => v), backgroundColor: COLORS, borderWidth: 0, borderRadius: 4 }]
+            },
+            options: {
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                devicePixelRatio: dpr,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => ` ₹${Math.round(ctx.raw).toLocaleString('en-IN')}` } }
+                },
+                scales: {
+                    x: { ticks: { color: '#94a3b8', font: { size: 10, family: 'Inter' }, callback: v => '₹' + Math.round(v/1000) + 'k' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    y: { ticks: { color: '#94a3b8', font: { size: 11, family: 'Inter' } }, grid: { display: false } }
+                }
+            }
+        }));
+    }
+
+    const eqCanvas = document.getElementById('portfolio-equity-chart');
+    if (eqCanvas && equity?.length) {
+        const eqSorted = [...equity].sort((a, b) => b.value - a.value);
+        const eqTotal  = eqSorted.reduce((s, e) => s + e.value, 0);
+        const EQ_COLORS = [...COLORS, '#f43f5e','#0ea5e9','#d946ef','#fb923c','#4ade80','#facc15','#38bdf8','#c084fc'];
+        portfolioCharts.push(new Chart(eqCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: eqSorted.map(e => e.name),
+                datasets: [{ data: eqSorted.map(e => e.value), backgroundColor: EQ_COLORS, borderWidth: 0, hoverOffset: 6 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                devicePixelRatio: dpr,
+                cutout: '55%',
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 10, family: 'Inter' }, boxWidth: 10, padding: 8 } },
+                    tooltip: { callbacks: { label: ctx => ` ₹${Math.round(ctx.raw).toLocaleString('en-IN')} (${((ctx.raw/eqTotal)*100).toFixed(1)}%)` } }
+                }
+            }
+        }));
+    }
+}
+
+function renderPortfolioLegacy(data) {
+    const folios = data.folios || [];
     let totalValue = 0, totalInvested = 0;
     const holdings = [];
-
     folios.forEach(folio => {
         (folio.schemes || []).forEach(scheme => {
             const val = scheme.valuation?.value || 0;
@@ -265,71 +751,38 @@ function renderPortfolioData(data) {
             let invested = 0;
             (scheme.transactions || []).forEach(tx => { if ((tx.amount || 0) > 0) invested += tx.amount; });
             totalInvested += invested;
-            holdings.push({ amc: folio.amc, scheme: scheme.scheme, units: scheme.close_units || 0,
-                            nav: scheme.valuation?.nav || 0, value: val, invested });
+            holdings.push({ amc: folio.amc, scheme: scheme.scheme, units: scheme.close_units || 0, nav: scheme.valuation?.nav || 0, value: val, invested });
         });
     });
     holdings.sort((a, b) => b.value - a.value);
-
-    const gain    = totalValue - totalInvested;
+    const gain = totalValue - totalInvested;
     const gainPct = totalInvested > 0 ? (gain / totalInvested) * 100 : 0;
-    const gc      = gain >= 0 ? 'val-green' : 'val-red';
-    const sign    = gain >= 0 ? '+' : '';
-    const fmtINR  = n => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
-    const fmtUnits = n => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
-
+    const gc = gain >= 0 ? 'val-green' : 'val-red';
+    const sign = gain >= 0 ? '+' : '';
+    const fmtINR = n => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
     document.getElementById('portfolio-content').innerHTML = `
         <div class="portfolio-header">
-            <div>
-                <div class="portfolio-investor-name">${investor.name || 'My Portfolio'}</div>
-                <div class="portfolio-period">Statement: ${period.from || ''} – ${period.to || ''} &nbsp;·&nbsp; ${holdings.length} scheme${holdings.length !== 1 ? 's' : ''}</div>
-            </div>
-            <button class="glass-btn" style="font-size:0.75rem;" onclick="casData=null; renderPortfolioUpload()">Upload New</button>
+            <div><div class="portfolio-investor-name">${data.investor_info?.name || 'My Portfolio'}</div></div>
+            <button class="glass-btn" style="font-size:0.75rem;" onclick="casData=null; renderPortfolioUpload()">↑ Upload New</button>
         </div>
         <div class="portfolio-summary-cards">
-            <div class="portfolio-summary-card">
-                <div class="portfolio-summary-label">Current Value</div>
-                <div class="portfolio-summary-value">${fmtINR(totalValue)}</div>
-            </div>
-            <div class="portfolio-summary-card">
-                <div class="portfolio-summary-label">Total Invested</div>
-                <div class="portfolio-summary-value">${fmtINR(totalInvested)}</div>
-            </div>
-            <div class="portfolio-summary-card">
-                <div class="portfolio-summary-label">Gain / Loss</div>
-                <div class="portfolio-summary-value ${gc}">${sign}${fmtINR(gain)}</div>
-            </div>
-            <div class="portfolio-summary-card">
-                <div class="portfolio-summary-label">Absolute Return</div>
-                <div class="portfolio-summary-value ${gc}">${sign}${gainPct.toFixed(1)}%</div>
-            </div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">Current Value</div><div class="portfolio-summary-value">${fmtINR(totalValue)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">Invested</div><div class="portfolio-summary-value">${fmtINR(totalInvested)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">Gain/Loss</div><div class="portfolio-summary-value ${gc}">${sign}${fmtINR(gain)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">Return</div><div class="portfolio-summary-value ${gc}">${sign}${gainPct.toFixed(1)}%</div></div>
         </div>
-        <div class="portfolio-table-wrapper">
-            <table class="market-table">
-                <thead><tr>
-                    <th>Scheme</th>
-                    <th>AMC</th>
-                    <th class="right-align">Units</th>
-                    <th class="right-align">NAV (₹)</th>
-                    <th class="right-align">Value (₹)</th>
-                    <th class="right-align">Return</th>
-                </tr></thead>
-                <tbody>${holdings.map(h => {
-                    const g    = h.value - h.invested;
-                    const gPct = h.invested > 0 ? (g / h.invested) * 100 : 0;
-                    const hgc  = g >= 0 ? 'val-green' : 'val-red';
-                    const hs   = g >= 0 ? '+' : '';
-                    return `<tr>
-                        <td class="portfolio-scheme-name">${h.scheme}</td>
-                        <td style="color:var(--text-secondary); font-size:0.8rem; white-space:nowrap;">${h.amc}</td>
-                        <td class="right-align" style="font-family:monospace; font-size:0.85rem;">${fmtUnits(h.units)}</td>
-                        <td class="right-align">₹${h.nav.toLocaleString('en-IN', {maximumFractionDigits:2})}</td>
-                        <td class="right-align" style="font-weight:600;">₹${Math.round(h.value).toLocaleString('en-IN')}</td>
-                        <td class="right-align ${hgc}">${hs}${gPct.toFixed(1)}%</td>
-                    </tr>`;
-                }).join('')}</tbody>
-            </table>
-        </div>`;
+        <div class="portfolio-table-wrapper"><table class="market-table">
+            <thead><tr><th>Scheme</th><th>AMC</th><th class="right-align">Units</th><th class="right-align">NAV</th><th class="right-align">Value</th><th class="right-align">Return</th></tr></thead>
+            <tbody>${holdings.map(h => {
+                const g = h.value - h.invested; const gPct = h.invested > 0 ? (g/h.invested)*100 : 0;
+                const hgc = g >= 0 ? 'val-green' : 'val-red'; const hs = g >= 0 ? '+' : '';
+                return `<tr><td class="portfolio-scheme-name">${h.scheme}</td><td style="color:var(--text-secondary);font-size:0.8rem;">${h.amc}</td>
+                    <td class="right-align" style="font-size:0.82rem;">${h.units.toLocaleString('en-IN',{maximumFractionDigits:3})}</td>
+                    <td class="right-align">₹${h.nav.toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+                    <td class="right-align" style="font-weight:600;">₹${Math.round(h.value).toLocaleString('en-IN')}</td>
+                    <td class="right-align ${hgc}">${hs}${gPct.toFixed(1)}%</td></tr>`;
+            }).join('')}</tbody>
+        </table></div>`;
 }
 
 function formatVal(val, currency = 'INR') {
@@ -514,7 +967,7 @@ function updateRow(tr, q) {
             <td class="symbol-col" data-name="${escapeAttr(q.name)}">${dotHtml}${q.symbol}</td>
             <td class="name-col hide-mobile">${q.name}</td>
             <td class="right-align price-col">${formatVal(q.currentPrice, q.currency)}</td>
-            <td class="right-align price-col ${changeClass}"><span class="hide-mobile">${signStr}${formatVal(q.change, q.currency)} </span>${signStr}${q.percentChange.toFixed(2)}%</td>
+            <td class="right-align price-col ${changeClass}"><span class="change-pct">${signStr}${q.percentChange.toFixed(2)}%</span><span class="change-abs">${signStr}${formatVal(q.change, q.currency)}</span></td>
             <td class="right-align name-col hide-mobile">${formatVal(q.fiftyTwoWeekHigh, q.currency)}</td>
             <td class="right-align name-col hide-mobile">${formatVal(q.fiftyTwoWeekLow, q.currency)}</td>
             <td class="right-align price-col ${deltaClass} hide-mobile">${deltaSignStr}${deltaHigh.toFixed(2)}%</td>
@@ -1501,7 +1954,7 @@ function createMFRow(mf) {
         <td class="symbol-col hide-mobile" style="font-size:0.8rem; color:var(--text-secondary);">${mf.schemeCode}</td>
         <td class="mf-scheme-name" title="${escapeAttr(mf.schemeName)}">${displayName}</td>
         <td class="right-align price-col">₹${navFmt}</td>
-        <td class="right-align price-col ${changeClass}"><span class="hide-mobile">${changeFmt} </span>${pctFmt}</td>
+        <td class="right-align price-col ${changeClass}"><span class="change-pct">${pctFmt}</span><span class="change-abs">${changeFmt}</span></td>
         <td class="right-align price-col">${fmtCagr(mf.cagr1y)}</td>
         <td class="right-align price-col hide-mobile">${fmtCagr(mf.cagr3y)}</td>
         <td class="right-align price-col hide-mobile">${high52Fmt}</td>
