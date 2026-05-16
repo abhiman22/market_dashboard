@@ -2030,6 +2030,99 @@ document.addEventListener('click', (e) => {
 
 refreshBtn.addEventListener('click', fetchQuotes);
 
+// ─── Push Notification Bell ───────────────────────────────────────────────────
+const notifyBtn = document.getElementById('notify-btn');
+
+async function initNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    notifyBtn.style.display = '';
+
+    const registration = await navigator.serviceWorker.ready;
+    const existing = await registration.pushManager.getSubscription();
+    setNotifyState(existing ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off');
+
+    notifyBtn.addEventListener('click', async () => {
+        if (notifyBtn.dataset.state === 'on') {
+            await unsubscribeFromPush(registration);
+        } else if (notifyBtn.dataset.state === 'denied') {
+            alert('Notifications are blocked. Open browser Settings → Site Settings → Notifications and allow this site.');
+        } else {
+            await subscribeToPush(registration);
+        }
+    });
+}
+
+async function subscribeToPush(registration) {
+    setNotifyState('loading');
+    try {
+        const res = await fetch('/api/push/vapid-public-key');
+        if (!res.ok) throw new Error('Push not configured on server');
+        const { publicKey } = await res.json();
+
+        const sub = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
+
+        await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub.toJSON())
+        });
+        setNotifyState('on');
+    } catch (e) {
+        console.error('Push subscribe failed:', e);
+        setNotifyState(Notification.permission === 'denied' ? 'denied' : 'off');
+    }
+}
+
+async function unsubscribeFromPush(registration) {
+    const sub = await registration.pushManager.getSubscription();
+    if (sub) {
+        await fetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint })
+        });
+        await sub.unsubscribe();
+    }
+    setNotifyState('off');
+}
+
+function setNotifyState(state) {
+    notifyBtn.dataset.state = state;
+    const icon = document.getElementById('notify-icon');
+    if (state === 'on') {
+        notifyBtn.title = 'Alerts on — click to disable';
+        notifyBtn.classList.add('notify-active');
+        notifyBtn.classList.remove('notify-denied');
+        icon.setAttribute('fill', 'currentColor');
+    } else if (state === 'denied') {
+        notifyBtn.title = 'Notifications blocked in browser settings';
+        notifyBtn.classList.remove('notify-active');
+        notifyBtn.classList.add('notify-denied');
+        icon.setAttribute('fill', 'none');
+    } else if (state === 'loading') {
+        notifyBtn.title = 'Subscribing…';
+        notifyBtn.classList.remove('notify-active', 'notify-denied');
+        icon.setAttribute('fill', 'none');
+    } else {
+        notifyBtn.title = 'Enable alerts';
+        notifyBtn.classList.remove('notify-active', 'notify-denied');
+        icon.setAttribute('fill', 'none');
+    }
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw     = window.atob(base64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+initNotifications();
+// ─────────────────────────────────────────────────────────────────────────────
+
 const REFRESH_INTERVAL = 60000; // 60 seconds
 
 function fetchGeneralNews() {

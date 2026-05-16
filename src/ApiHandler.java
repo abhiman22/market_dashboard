@@ -22,6 +22,8 @@ public class ApiHandler implements HttpHandler {
     private final StockAPIClient apiClient;
     private final MFApiClient mfApiClient;
     private static final Gson gson = new Gson();
+    private static volatile AlertScheduler alertScheduler;
+    public static void setAlertScheduler(AlertScheduler s) { alertScheduler = s; }
     
     // In-memory cache for quotes (Symbol -> StockQuote)
     private static final Map<String, StockQuote> quoteCache = new ConcurrentHashMap<>();
@@ -142,7 +144,8 @@ public class ApiHandler implements HttpHandler {
         
         // Add CORS Headers globally
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
         
         if ("OPTIONS".equals(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(204, -1);
@@ -168,6 +171,16 @@ public class ApiHandler implements HttpHandler {
             handleLiveStream(exchange);
         } else if ("/api/events".equals(path)) {
             handleGlobalEvents(exchange);
+        } else if ("/api/push/test".equals(path)) {
+            handlePushTest(exchange);
+        } else if ("/api/push/test-rsi".equals(path)) {
+            handlePushTestRsi(exchange);
+        } else if ("/api/push/vapid-public-key".equals(path)) {
+            handleVapidPublicKey(exchange);
+        } else if ("/api/push/subscribe".equals(path)) {
+            handlePushSubscribe(exchange);
+        } else if ("/api/push/unsubscribe".equals(path)) {
+            handlePushUnsubscribe(exchange);
         } else if (path.startsWith("/api/mf")) {
             handleMF(exchange, path);
         } else {
@@ -906,6 +919,69 @@ public class ApiHandler implements HttpHandler {
         } catch (Exception e) {
             System.err.println("EONET events error: " + e.getMessage());
             sendJsonResponse(exchange, 500, "{\"error\":\"" + escapeJson(e.getMessage()) + "\",\"events\":[]}");
+        }
+    }
+
+    private void handlePushTest(HttpExchange exchange) throws IOException {
+        if (alertScheduler != null) {
+            alertScheduler.sendTestAlerts();
+        } else {
+            PushSubscriptionStore.getInstance().broadcast("Market Insights Alert", "Test — push is working!");
+        }
+        sendJsonResponse(exchange, 200, "{\"ok\":true,\"subscribers\":"
+            + PushSubscriptionStore.getInstance().getAll().size() + "}");
+    }
+
+    private void handlePushTestRsi(HttpExchange exchange) throws IOException {
+        if (alertScheduler != null) {
+            new Thread(() -> alertScheduler.triggerRsiScan()).start();
+            sendJsonResponse(exchange, 200, "{\"ok\":true,\"message\":\"RSI scan started — notification incoming in ~30s\"}");
+        } else {
+            sendJsonResponse(exchange, 503, "{\"error\":\"Scheduler not running\"}");
+        }
+    }
+
+    private void handleVapidPublicKey(HttpExchange exchange) throws IOException {
+        String key = WebPushSender.getPublicKeyB64();
+        if (key == null) {
+            sendJsonResponse(exchange, 503, "{\"error\":\"Push not configured\"}");
+        } else {
+            sendJsonResponse(exchange, 200, "{\"publicKey\":\"" + key + "\"}");
+        }
+    }
+
+    private void handlePushSubscribe(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            return;
+        }
+        try {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            JsonObject obj  = gson.fromJson(body, JsonObject.class);
+            String endpoint = obj.get("endpoint").getAsString();
+            JsonObject keys = obj.getAsJsonObject("keys");
+            String p256dh   = keys.get("p256dh").getAsString();
+            String auth     = keys.get("auth").getAsString();
+            PushSubscriptionStore.getInstance().add(endpoint, p256dh, auth);
+            sendJsonResponse(exchange, 201, "{\"ok\":true}");
+        } catch (Exception e) {
+            sendJsonResponse(exchange, 400, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    private void handlePushUnsubscribe(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            return;
+        }
+        try {
+            String body     = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            JsonObject obj  = gson.fromJson(body, JsonObject.class);
+            String endpoint = obj.get("endpoint").getAsString();
+            PushSubscriptionStore.getInstance().remove(endpoint);
+            sendJsonResponse(exchange, 200, "{\"ok\":true}");
+        } catch (Exception e) {
+            sendJsonResponse(exchange, 400, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
         }
     }
 
