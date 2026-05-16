@@ -1045,6 +1045,74 @@ body {
     margin-bottom: 0;
 }
 
+/* EONET Global Events */
+.mc-events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.75rem;
+}
+.mc-event-card {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+.mc-event-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.mc-event-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.mc-event-count {
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-left: auto;
+}
+.mc-event-names {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.mc-event-names li {
+    font-size: 0.76rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.mc-event-more {
+    color: var(--text-secondary) !important;
+    font-style: italic;
+}
+.mc-event-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    border-top: 1px solid rgba(255,255,255,0.05);
+    padding-top: 0.5rem;
+    margin-top: 0.1rem;
+}
+.mc-event-date { opacity: 0.7; }
+.mc-event-impact strong { color: var(--text-primary); font-weight: 600; }
+
 /* Portfolio Tab */
 .portfolio-content {
     display: none;

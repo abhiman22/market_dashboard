@@ -54,6 +54,22 @@ public class ApiHandler implements HttpHandler {
     private static final double GOLD_UNIT_G   = 10.0;    // per 10 grams
     private static final double SILVER_UNIT_G = 1000.0;  // per 1 kg
 
+    // EONET — Global natural events cache (15-minute TTL)
+    private static volatile String eventsCache = null;
+    private static volatile long   eventsCacheTime = 0L;
+    private static final long EVENTS_CACHE_MS = 15 * 60 * 1000L;
+    private static final Set<String> HIGH_IMPACT_CATEGORIES = Set.of(
+        "wildfires", "severeStorms", "floods", "drought", "earthquakes", "volcanoes"
+    );
+    private static final Map<String, String> CATEGORY_MARKET_IMPACT = Map.of(
+        "wildfires",     "Insurance, Lumber, Oil & Gas",
+        "severeStorms",  "Insurance, Airlines, Oil & Gas",
+        "floods",        "Agriculture, Infrastructure",
+        "drought",       "Agri Commodities, FMCG",
+        "earthquakes",   "Insurance, Construction",
+        "volcanoes",     "Aviation, Agriculture"
+    );
+
     // AMC names that match the start of scheme names in the mfapi.in dataset
     private static final List<String> KNOWN_AMCS = Arrays.asList(
         "Aditya Birla Sun Life", "Axis", "Bandhan", "Canara Robeco", "DSP",
@@ -150,6 +166,8 @@ public class ApiHandler implements HttpHandler {
             handleCalendar(exchange);
         } else if ("/api/live-stream".equals(path)) {
             handleLiveStream(exchange);
+        } else if ("/api/events".equals(path)) {
+            handleGlobalEvents(exchange);
         } else if (path.startsWith("/api/mf")) {
             handleMF(exchange, path);
         } else {
@@ -810,6 +828,84 @@ public class ApiHandler implements HttpHandler {
             sendJsonResponse(exchange, 200, "{\"videoId\": \"" + escapeJson(videoId) + "\"}");
         } catch (Exception e) {
             sendJsonResponse(exchange, 500, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    private void handleGlobalEvents(HttpExchange exchange) throws IOException {
+        long now = System.currentTimeMillis();
+        if (eventsCache != null && (now - eventsCacheTime) < EVENTS_CACHE_MS) {
+            sendJsonResponse(exchange, 200, eventsCache);
+            return;
+        }
+        try {
+            String url = "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=50&days=30";
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", "MarketDashboard/1.0")
+                .timeout(java.time.Duration.ofSeconds(8))
+                .build();
+            HttpResponse<String> resp = HttpClient.newHttpClient()
+                .send(req, HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) {
+                sendJsonResponse(exchange, 502, "{\"error\":\"EONET API error\",\"events\":[]}");
+                return;
+            }
+
+            JsonObject root = gson.fromJson(resp.body(), JsonObject.class);
+            com.google.gson.JsonArray events = root.getAsJsonArray("events");
+
+            List<String> filtered = new ArrayList<>();
+            for (com.google.gson.JsonElement el : events) {
+                if (filtered.size() >= 20) break;
+                JsonObject ev = el.getAsJsonObject();
+
+                // Find first matching high-impact category
+                String catId = "", catLabel = "";
+                com.google.gson.JsonArray cats = ev.getAsJsonArray("categories");
+                for (com.google.gson.JsonElement ce : cats) {
+                    JsonObject c = ce.getAsJsonObject();
+                    String id = c.get("id").getAsString();
+                    if (HIGH_IMPACT_CATEGORIES.contains(id)) {
+                        catId    = id;
+                        catLabel = c.get("title").getAsString();
+                        break;
+                    }
+                }
+                if (catId.isEmpty()) continue;
+
+                String title = ev.has("title") ? ev.get("title").getAsString() : "";
+
+                // Most recent geometry date
+                String date = "";
+                if (ev.has("geometry")) {
+                    com.google.gson.JsonArray geoms = ev.getAsJsonArray("geometry");
+                    if (geoms.size() > 0) {
+                        JsonObject g = geoms.get(geoms.size() - 1).getAsJsonObject();
+                        date = g.has("date") ? g.get("date").getAsString() : "";
+                        if (date.contains("T")) date = date.substring(0, date.indexOf("T"));
+                    }
+                }
+
+                String impact = CATEGORY_MARKET_IMPACT.getOrDefault(catId, "Monitor situation");
+                filtered.add(String.format(
+                    "{\"id\":\"%s\",\"title\":\"%s\",\"category\":\"%s\",\"categoryLabel\":\"%s\",\"date\":\"%s\",\"marketImpact\":\"%s\"}",
+                    escapeJson(ev.has("id") ? ev.get("id").getAsString() : ""),
+                    escapeJson(title),
+                    escapeJson(catId),
+                    escapeJson(catLabel),
+                    escapeJson(date),
+                    escapeJson(impact)
+                ));
+            }
+
+            String result = "{\"events\":[" + String.join(",", filtered) + "]}";
+            eventsCache     = result;
+            eventsCacheTime = now;
+            sendJsonResponse(exchange, 200, result);
+        } catch (Exception e) {
+            System.err.println("EONET events error: " + e.getMessage());
+            sendJsonResponse(exchange, 500, "{\"error\":\"" + escapeJson(e.getMessage()) + "\",\"events\":[]}");
         }
     }
 

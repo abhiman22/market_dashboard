@@ -797,11 +797,12 @@ async function renderMarketContext() {
         <p style="color:var(--text-secondary);font-size:0.88rem;">Loading market data…</p>
     </div>`;
 
-    const [quotesRes, rbiRes, fiiRes, pcrRes] = await Promise.allSettled([
+    const [quotesRes, rbiRes, fiiRes, pcrRes, eventsRes] = await Promise.allSettled([
         fetch('/api/quotes?symbols=%5EINDIAVIX,%5ENSEI,%5ENSEBANK,%5ECNXIT').then(r => r.json()),
         fetch('/api/market-context/rbi').then(r => r.json()),
         fetch('/api/market-context/fiidii').then(r => r.json()),
         fetch('/api/market-context/pcr').then(r => r.json()),
+        fetch('/api/events').then(r => r.json()),
     ]);
 
     const quotes  = (quotesRes.status === 'fulfilled' && Array.isArray(quotesRes.value)) ? quotesRes.value : [];
@@ -812,11 +813,13 @@ async function renderMarketContext() {
     const rbi     = rbiRes.status === 'fulfilled' && !rbiRes.value?.error   ? rbiRes.value  : null;
     const fii     = fiiRes.status === 'fulfilled' && !fiiRes.value?.error   ? fiiRes.value  : null;
     const pcr     = pcrRes.status === 'fulfilled' && !pcrRes.value?.error   ? pcrRes.value  : null;
+    const events  = (eventsRes.status === 'fulfilled' && Array.isArray(eventsRes.value?.events)) ? eventsRes.value.events : [];
 
     el.innerHTML = `
         ${renderVixPcrSection(vix, pcr, nifty, bank, it)}
         ${renderRbiSection(rbi)}
         ${renderFiiDiiSection(fii)}
+        ${renderGlobalEventsSection(events)}
     `;
 }
 
@@ -1021,6 +1024,56 @@ function renderFiiDiiSection(data) {
             ${row('DII', dii)}
         </div>
         <p class="mc-source-note">Source: NSE India · Cash segment only</p>
+    </div>`;
+}
+
+const EONET_CATEGORY_META = {
+    wildfires:    { label: 'Wildfire',       color: '#f97316', impact: 'Insurance · Lumber · Oil & Gas' },
+    severeStorms: { label: 'Severe Storm',   color: '#818cf8', impact: 'Insurance · Airlines · Oil & Gas' },
+    floods:       { label: 'Flood',          color: '#38bdf8', impact: 'Agriculture · Infrastructure' },
+    drought:      { label: 'Drought',        color: '#fbbf24', impact: 'Agri Commodities · FMCG' },
+    earthquakes:  { label: 'Earthquake',     color: '#94a3b8', impact: 'Insurance · Construction' },
+    volcanoes:    { label: 'Volcano',        color: '#fb7185', impact: 'Aviation · Agriculture' },
+};
+
+function renderGlobalEventsSection(events) {
+    const title = `<div class="mc-section-title">Active Global Natural Events <span class="mc-asof">Source: NASA EONET · open events</span></div>`;
+
+    if (!events || events.length === 0) {
+        return `<div class="mc-section">${title}<p class="mc-na" style="padding:0.25rem 0 0.5rem;">No active high-impact events reported.</p></div>`;
+    }
+
+    // Group by category
+    const groups = {};
+    events.forEach(ev => {
+        if (!groups[ev.category]) groups[ev.category] = [];
+        groups[ev.category].push(ev);
+    });
+
+    const cards = Object.entries(groups).map(([catId, evs]) => {
+        const meta = EONET_CATEGORY_META[catId] || { label: evs[0].categoryLabel, color: '#60a5fa', impact: evs[0].marketImpact };
+        const mostRecent = evs[0].date || '';
+        const sample = evs.slice(0, 3).map(e => `<li>${e.title}</li>`).join('');
+        const more = evs.length > 3 ? `<li class="mc-event-more">+${evs.length - 3} more</li>` : '';
+        return `
+        <div class="mc-event-card" style="border-left:3px solid ${meta.color};">
+            <div class="mc-event-card-header">
+                <span class="mc-event-badge" style="background:${meta.color}20;color:${meta.color};border-color:${meta.color}40;">${meta.label}</span>
+                <span class="mc-event-count" style="color:${meta.color};">${evs.length} active</span>
+            </div>
+            <ul class="mc-event-names">${sample}${more}</ul>
+            <div class="mc-event-footer">
+                <span class="mc-event-date">Latest: ${mostRecent}</span>
+                <span class="mc-event-impact">May affect: <strong>${meta.impact}</strong></span>
+            </div>
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="mc-section">
+        ${title}
+        <div class="mc-events-grid">${cards}</div>
+        <p class="mc-source-note">Categories tracked: wildfires, severe storms, floods, droughts, earthquakes, volcanoes</p>
     </div>`;
 }
 
