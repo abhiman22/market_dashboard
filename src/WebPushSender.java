@@ -100,11 +100,13 @@ public class WebPushSender {
 
             HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
             int status = resp.statusCode();
+            String shortEndpoint = endpoint.substring(0, Math.min(60, endpoint.length()));
+            System.out.println("[push] Sent to " + shortEndpoint + "... → HTTP " + status);
             if (status == 410 || status == 404) {
                 PushSubscriptionStore.getInstance().remove(endpoint);
                 System.out.println("[push] Removed expired subscription.");
             } else if (status >= 400) {
-                System.err.println("[push] Delivery failed: HTTP " + status);
+                System.err.println("[push] Delivery failed: HTTP " + status + " body: " + resp.body());
             }
         } catch (Exception e) {
             System.err.println("[push] Send error: " + e.getMessage());

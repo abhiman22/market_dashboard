@@ -171,6 +171,8 @@ public class ApiHandler implements HttpHandler {
             handleLiveStream(exchange);
         } else if ("/api/events".equals(path)) {
             handleGlobalEvents(exchange);
+        } else if ("/api/push/debug".equals(path)) {
+            handlePushDebug(exchange);
         } else if ("/api/push/test".equals(path)) {
             handlePushTest(exchange);
         } else if ("/api/push/test-rsi".equals(path)) {
@@ -920,6 +922,25 @@ public class ApiHandler implements HttpHandler {
             System.err.println("EONET events error: " + e.getMessage());
             sendJsonResponse(exchange, 500, "{\"error\":\"" + escapeJson(e.getMessage()) + "\",\"events\":[]}");
         }
+    }
+
+    private void handlePushDebug(HttpExchange exchange) throws IOException {
+        List<PushSubscriptionStore.Subscription> subs = PushSubscriptionStore.getInstance().getAll();
+        StringBuilder sb = new StringBuilder("{\"count\":" + subs.size() + ",\"subscriptions\":[");
+        for (int i = 0; i < subs.size(); i++) {
+            String ep = subs.get(i).endpoint;
+            String service = ep.contains("googleapis") ? "FCM(Android/Chrome)"
+                           : ep.contains("apple")      ? "APNs(Safari)"
+                           : ep.contains("mozilla")    ? "Mozilla"
+                           : ep.contains("microsoft")  ? "WNS(Edge)"
+                           : "Unknown";
+            String short_ep = ep.substring(0, Math.min(80, ep.length())) + "...";
+            sb.append("{\"service\":\"").append(service).append("\",\"endpoint\":\"")
+              .append(escapeJson(short_ep)).append("\"}");
+            if (i < subs.size() - 1) sb.append(",");
+        }
+        sb.append("]}");
+        sendJsonResponse(exchange, 200, sb.toString());
     }
 
     private void handlePushTest(HttpExchange exchange) throws IOException {
