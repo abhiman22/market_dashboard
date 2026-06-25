@@ -34,10 +34,10 @@ public class App {
         // Warm up subscription store
         PushSubscriptionStore.getInstance();
 
-        // Start alert scheduler
-        AlertScheduler alertScheduler = new AlertScheduler();
-        alertScheduler.start();
-        ApiHandler.setAlertScheduler(alertScheduler);
+        // Alert scheduler disabled — notification flow being redesigned
+        // AlertScheduler alertScheduler = new AlertScheduler();
+        // alertScheduler.start();
+        // ApiHandler.setAlertScheduler(alertScheduler);
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();

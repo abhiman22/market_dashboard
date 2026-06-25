@@ -15,9 +15,21 @@ public class AlertScheduler {
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
-    // Alert 1
-    private static final String[] DROP_SYMBOLS = {"^NSEI",    "^BSESN"};
-    private static final String[] DROP_NAMES   = {"Nifty 50", "Sensex"};
+    // Alert 1 — Indian indices (checked during Indian market hours)
+    private static final String[] INDIAN_DROP_SYMBOLS = {
+        "^NSEI",     "^BSESN",  "^NSEMDCP50",     "BSE-MIDCAP.BO", "BSE-SMLCAP.BO"
+    };
+    private static final String[] INDIAN_DROP_NAMES = {
+        "Nifty 50",  "Sensex",  "Nifty Midcap 50", "BSE Midcap",    "BSE Smallcap"
+    };
+
+    // Alert 1 — US indices (checked during US market hours)
+    private static final String[] US_DROP_SYMBOLS = {"^IXIC",   "^GSPC"  };
+    private static final String[] US_DROP_NAMES   = {"NASDAQ",  "S&P 500"};
+
+    // Alert 1 — Commodities (checked during extended weekday hours)
+    private static final String[] COMMODITY_DROP_SYMBOLS = {"GC=F", "SI=F"  };
+    private static final String[] COMMODITY_DROP_NAMES   = {"Gold", "Silver"};
 
     // Alert 2
     private static final String[] SUMMARY_SYMBOLS = {"^NSEI", "^BSESN",    "^NSEBANK",   "^CNXIT"};
@@ -60,11 +72,9 @@ public class AlertScheduler {
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     public void start() {
-        // Drop alert: every 5 minutes (1-minute initial delay to let server warm up)
-        scheduler.scheduleAtFixedRate(this::checkDropAlert, 1, 5, TimeUnit.MINUTES);
-        // Close summary + RSI scan: checked every minute to catch exact minute
-        scheduler.scheduleAtFixedRate(this::checkCloseSummary, 1, 1, TimeUnit.MINUTES);
-        scheduler.scheduleAtFixedRate(this::checkRsiAlert,     1, 1, TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(this::checkDropAlert,    1, 5, TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(this::checkCloseSummary, 1, 5, TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(this::checkRsiAlert,     1, 5, TimeUnit.MINUTES);
         System.out.println("[alerts] Scheduler started — monitoring Nifty, Sensex & weekly RSI.");
     }
 
@@ -80,9 +90,8 @@ public class AlertScheduler {
 
     private void checkDropAlert() {
         ZonedDateTime ist = ZonedDateTime.now(IST);
-        if (!isMarketHours(ist)) return;
 
-        // Reset session state on a new trading day
+        // Reset session state on a new trading day (IST)
         String today = ist.toLocalDate().toString();
         if (!today.equals(lastSessionDate)) {
             sessionOpenPrice.clear();
@@ -90,20 +99,27 @@ public class AlertScheduler {
             lastSessionDate = today;
         }
 
-        Map<String, double[]> quotes = fetchQuotes(DROP_SYMBOLS);
+        if (isMarketHours(ist))
+            checkDropGroup(INDIAN_DROP_SYMBOLS, INDIAN_DROP_NAMES);
+        if (isUSMarketHours(ist))
+            checkDropGroup(US_DROP_SYMBOLS, US_DROP_NAMES);
+        if (isCommodityHours(ist))
+            checkDropGroup(COMMODITY_DROP_SYMBOLS, COMMODITY_DROP_NAMES);
+    }
 
-        for (int i = 0; i < DROP_SYMBOLS.length; i++) {
-            String sym  = DROP_SYMBOLS[i];
-            String name = DROP_NAMES[i];
+    private void checkDropGroup(String[] symbols, String[] names) {
+        Map<String, double[]> quotes = fetchQuotes(symbols);
+        for (int i = 0; i < symbols.length; i++) {
+            String sym  = symbols[i];
+            String name = names[i];
             if (dropAlertSent.contains(sym)) continue;
 
             double[] q = quotes.get(sym);
-            if (q == null) continue; // [open, current]
+            if (q == null) continue;
 
             double open    = q[0];
             double current = q[1];
 
-            // Use the first successful fetch of the day as the session open reference
             sessionOpenPrice.putIfAbsent(sym, open > 0 ? open : current);
             double sessionOpen = sessionOpenPrice.get(sym);
             if (sessionOpen <= 0) continue;
@@ -113,7 +129,7 @@ public class AlertScheduler {
                 String rec   = pct <= -2.0 ? "Strong Buy on dip" : "Potential Buy on dip";
                 String title = String.format("%s down %.2f%% — %s", name, Math.abs(pct), rec);
                 String body  = String.format(
-                    "Open: %.0f  →  Now: %.0f (%.2f%%)%nConsider accumulating if fundamentals unchanged.",
+                    "Open: %.2f  →  Now: %.2f (%.2f%%)%nConsider accumulating if fundamentals unchanged.",
                     sessionOpen, current, pct);
                 PushSubscriptionStore.getInstance().broadcast(title, body);
                 dropAlertSent.add(sym);
@@ -334,5 +350,21 @@ public class AlertScheduler {
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
         int mins = ist.getHour() * 60 + ist.getMinute();
         return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30; // 9:15–15:30 IST
+    }
+
+    private boolean isUSMarketHours(ZonedDateTime ist) {
+        ZonedDateTime et = ist.withZoneSameInstant(ZoneId.of("America/New_York"));
+        DayOfWeek dow = et.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        int mins = et.getHour() * 60 + et.getMinute();
+        return mins >= 9 * 60 + 30 && mins <= 16 * 60; // 9:30–16:00 ET
+    }
+
+    // Gold/Silver trade ~24h on weekdays; check 9 AM–11 PM IST to cover both sessions
+    private boolean isCommodityHours(ZonedDateTime ist) {
+        DayOfWeek dow = ist.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        int hour = ist.getHour();
+        return hour >= 9 && hour < 23;
     }
 }

@@ -1437,7 +1437,7 @@ async function toggleChart(symbol, tr) {
 }
 
 
-function computeAndRenderMetrics(prices, canvasId) {
+function computeAndRenderMetrics(prices, canvasId, symbol) {
     const metricsContent = document.getElementById(`metrics-content-${canvasId}`);
     if (!metricsContent) return;
 
@@ -1487,12 +1487,18 @@ function computeAndRenderMetrics(prices, canvasId) {
     const pct = (v, d = 1) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%`;
     const cls = (v) => v >= 0 ? 'positive' : 'negative';
 
+    const q = symbol ? quotesMap.get(symbol) : null;
+    const cagr3yCard = q?.cagr3y ? `<div class="metric-card"><div class="metric-label">CAGR (3Y)</div><div class="metric-value ${cls(q.cagr3y / 100)}">${q.cagr3y > 0 ? '+' : ''}${q.cagr3y.toFixed(2)}%</div></div>` : '';
+    const cagr5yCard = q?.cagr5y ? `<div class="metric-card"><div class="metric-label">CAGR (5Y)</div><div class="metric-value ${cls(q.cagr5y / 100)}">${q.cagr5y > 0 ? '+' : ''}${q.cagr5y.toFixed(2)}%</div></div>` : '';
+
     metricsContent.className = 'metrics-grid';
     metricsContent.innerHTML = `
         <div class="metric-card">
             <div class="metric-label">CAGR (1Y)</div>
             <div class="metric-value ${cls(cagr)}">${pct(cagr)}</div>
         </div>
+        ${cagr3yCard}
+        ${cagr5yCard}
         <div class="metric-card">
             <div class="metric-label">Sharpe Ratio</div>
             <div class="metric-value ${sharpe >= 1 ? 'positive' : sharpe >= 0 ? '' : 'negative'}">${sharpe.toFixed(2)}</div>
@@ -1596,7 +1602,7 @@ function processAndRenderChart(chartData, symbol, range, canvasId) {
 
     renderChart(canvasId, labels, prices, symbol, range, isUp);
     loading.style.display = 'none';
-    if (range === '1y') computeAndRenderMetrics(prices, canvasId);
+    if (range === '1y') computeAndRenderMetrics(prices, canvasId, symbol);
 }
 
 function renderNews(newsData, canvasId) {
@@ -3293,8 +3299,9 @@ function buildETFCompareMetricsTable(fundsData) {
 // =============================================================================
 
 const LIVE_CHANNELS = [
-    { name: 'Bloomberg', embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCIALMKvObZNtJ6AmdCLP7Lg&autoplay=1&mute=1&rel=0' },
-    { name: 'CNBC',      embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCvJJ_dzjViJCoLf5uKUTwoA&autoplay=1&mute=1&rel=0' },
+    { name: 'Bloomberg',  embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCIALMKvObZNtJ6AmdCLP7Lg&autoplay=1&mute=1&rel=0' },
+    { name: 'CNBC',       embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCvJJ_dzjViJCoLf5uKUTwoA&autoplay=1&mute=1&rel=0' },
+    { name: 'Euronews',   embedUrl: 'https://www.youtube.com/embed/live_stream?channel=UCSrZ3UV4jOidv8ppoVuvW9Q&autoplay=1&mute=1&rel=0' },
 ];
 
 function initLiveTV() {

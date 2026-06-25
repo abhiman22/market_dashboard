@@ -22,8 +22,8 @@ public class StockAPIClient {
 
     public StockQuote getQuote(String symbol) throws IOException, InterruptedException {
         try {
-            // Enriched fetch: 1y daily data gives us CAGR 1Y + YTD + correct previous close
-            return doGetQuote(symbol, "?range=1y&interval=1d", true);
+            // Enriched fetch: 5y daily data gives us CAGR 1Y/3Y/5Y + YTD + correct previous close
+            return doGetQuote(symbol, "?range=5y&interval=1d", true);
         } catch (IOException e) {
             // Some symbols (currency crosses, certain futures) don't support 1y/1mo —
             // fall back to bare URL; CAGR and YTD will be 0
@@ -69,13 +69,13 @@ public class StockAPIClient {
 
                 String currency = meta.has("currency") ? meta.get("currency").getAsString() : "INR";
 
-                // Default previous close from meta (works for bare URL fallback)
-                double previousClose = meta.has("chartPreviousClose") && enriched == false
+                // Default previous close — overridden from daily close array when enriched
+                double previousClose = meta.has("chartPreviousClose")
                         ? meta.get("chartPreviousClose").getAsDouble()
                         : currentPrice;
 
                 double ytdChange = 0.0;
-                double cagr1y = 0.0;
+                double cagr1y = 0.0, cagr3y = 0.0, cagr5y = 0.0;
                 if (enriched) {
                     try {
                         com.google.gson.JsonArray timestamps = result.getAsJsonArray("timestamp");
@@ -84,46 +84,63 @@ public class StockAPIClient {
                                 .getAsJsonArray("quote").get(0).getAsJsonObject()
                                 .getAsJsonArray("close");
 
-                        // Collect valid (non-null) closes to derive previous close.
-                        // With range=1y&interval=1d: when market is closed today's bar is the last
-                        // entry and equals regularMarketPrice; the second-to-last is yesterday's close.
-                        // When market is open intraday today's bar is absent and the last entry IS
-                        // yesterday's close.
+                        // Derive previous close from daily close array (accurate regardless of range)
                         java.util.List<Double> validCloses = new java.util.ArrayList<>();
                         for (int i = 0; i < closes.size(); i++) {
-                            if (!closes.get(i).isJsonNull()) {
-                                validCloses.add(closes.get(i).getAsDouble());
-                            }
+                            if (!closes.get(i).isJsonNull()) validCloses.add(closes.get(i).getAsDouble());
                         }
                         if (validCloses.size() >= 2) {
                             double lastClose = validCloses.get(validCloses.size() - 1);
-                            if (Math.abs(lastClose - currentPrice) < 0.01 * currentPrice) {
-                                // last bar is today's settled close → prev close is second-to-last
-                                previousClose = validCloses.get(validCloses.size() - 2);
-                            } else {
-                                // market is open intraday → last bar is yesterday
-                                previousClose = lastClose;
-                            }
+                            previousClose = Math.abs(lastClose - currentPrice) < 0.01 * currentPrice
+                                    ? validCloses.get(validCloses.size() - 2)  // settled close — prev is second-to-last
+                                    : lastClose;                                // intraday — last bar is yesterday
                         } else if (validCloses.size() == 1) {
                             previousClose = validCloses.get(0);
                         }
 
-                        double firstClose = validCloses.isEmpty() ? Double.NaN : validCloses.get(0);
-                        if (!Double.isNaN(firstClose) && firstClose != 0) {
-                            cagr1y = ((currentPrice - firstClose) / firstClose) * 100;
-                        }
-
+                        long now = System.currentTimeMillis() / 1000;
+                        long target1y = now - (long)(365.25 * 86400);
+                        long target3y = now - (long)(3 * 365.25 * 86400);
+                        long target5y = now - (long)(5 * 365.25 * 86400);
                         long jan1Epoch = java.time.LocalDate.now().withDayOfYear(1)
                                 .atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond();
+
+                        double price1y = Double.NaN, price3y = Double.NaN, price5y = Double.NaN;
                         double ytdStart = Double.NaN;
+                        boolean found1y = false, found3y = false, found5y = false, foundYtd = false;
+
                         for (int i = 0; i < timestamps.size(); i++) {
-                            if (timestamps.get(i).getAsLong() >= jan1Epoch && !closes.get(i).isJsonNull()) {
-                                ytdStart = closes.get(i).getAsDouble();
-                                break;
-                            }
+                            if (closes.get(i).isJsonNull()) continue;
+                            long ts = timestamps.get(i).getAsLong();
+                            double close = closes.get(i).getAsDouble();
+                            if (!found5y  && ts >= target5y)  { price5y  = close; found5y  = true; }
+                            if (!found3y  && ts >= target3y)  { price3y  = close; found3y  = true; }
+                            if (!found1y  && ts >= target1y)  { price1y  = close; found1y  = true; }
+                            if (!foundYtd && ts >= jan1Epoch) { ytdStart = close; foundYtd = true; }
                         }
-                        if (!Double.isNaN(ytdStart) && ytdStart != 0) {
+
+                        if (!Double.isNaN(ytdStart) && ytdStart != 0)
                             ytdChange = ((currentPrice - ytdStart) / ytdStart) * 100;
+                        if (!Double.isNaN(price1y) && price1y != 0)
+                            cagr1y = ((currentPrice - price1y) / price1y) * 100;
+                        if (!Double.isNaN(price3y) && price3y != 0)
+                            cagr3y = (Math.pow(currentPrice / price3y, 1.0 / 3) - 1) * 100;
+                        if (!Double.isNaN(price5y) && price5y != 0)
+                            cagr5y = (Math.pow(currentPrice / price5y, 1.0 / 5) - 1) * 100;
+
+                        // Compute 52W high/low from last 252 trading days of close data.
+                        // Overrides meta fields which are absent for many NSE sectoral indices (^CNX*).
+                        if (!validCloses.isEmpty()) {
+                            int from = Math.max(0, validCloses.size() - 252);
+                            double computed52wHigh = validCloses.get(from);
+                            double computed52wLow  = validCloses.get(from);
+                            for (int i = from + 1; i < validCloses.size(); i++) {
+                                double c = validCloses.get(i);
+                                if (c > computed52wHigh) computed52wHigh = c;
+                                if (c < computed52wLow)  computed52wLow  = c;
+                            }
+                            fiftyTwoWeekHigh = computed52wHigh;
+                            fiftyTwoWeekLow  = computed52wLow;
                         }
                     } catch (Exception ignored) {}
                 }
@@ -132,7 +149,7 @@ public class StockAPIClient {
                 double percentChange = previousClose != 0 ? (change / previousClose) * 100 : 0.0;
 
                 return new StockQuote(currentSymbol, name, currentPrice, change, percentChange, fiftyTwoWeekHigh,
-                        fiftyTwoWeekLow, currency, ytdChange, cagr1y);
+                        fiftyTwoWeekLow, currency, ytdChange, cagr1y, cagr3y, cagr5y);
             } else if (chart.has("error") && !chart.get("error").isJsonNull()) {
                 String errorDesc = chart.getAsJsonObject("error").get("description").getAsString();
                 throw new IOException("API Error for " + symbol + ": " + errorDesc);

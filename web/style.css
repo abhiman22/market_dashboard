@@ -318,6 +318,7 @@ body {
     transition: background 0.2s ease;
 }
 
+
 .market-table tbody tr:not(.chart-row) {
     cursor: pointer;
     border-left: 2px solid transparent;

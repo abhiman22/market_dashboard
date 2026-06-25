@@ -134,7 +134,9 @@ public class ApiHandler implements HttpHandler {
             q.getFiftyTwoWeekLow() * factor,
             "INR",
             q.getYtdChange(),
-            q.getCagr1y()
+            q.getCagr1y(),
+            q.getCagr3y(),
+            q.getCagr5y()
         );
     }
 
@@ -185,6 +187,8 @@ public class ApiHandler implements HttpHandler {
             handlePushUnsubscribe(exchange);
         } else if (path.startsWith("/api/mf")) {
             handleMF(exchange, path);
+        } else if ("/api/ping".equals(path)) {
+            sendJsonResponse(exchange, 200, "{\"status\":\"ok\"}");
         } else {
             exchange.sendResponseHeaders(404, -1);
         }
@@ -269,7 +273,7 @@ public class ApiHandler implements HttpHandler {
                     if (quoteCache.containsKey(trimmed)) {
                         quotesList.add(quoteCache.get(trimmed));
                     } else {
-                        quotesList.add(new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0, null, 0.0, 0.0));
+                        quotesList.add(new StockQuote(trimmed, "Fallback", 0.0, 0.0, 0.0, 0.0, 0.0, null, 0.0, 0.0, 0.0, 0.0));
                     }
                 }
             });
